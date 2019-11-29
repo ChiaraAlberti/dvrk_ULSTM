@@ -41,7 +41,9 @@ class LossFunction:
         y_pred_f = tf.reshape(y_pred, [-1])
         print(y_true_f.shape)
         print(y_pred_f.shape)
-        
+
+
+
         intersection = tf.reduce_sum(y_true_f * y_pred_f)
         score = (2. * intersection + smooth) / (tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f) + smooth)
         return score
