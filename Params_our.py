@@ -89,7 +89,7 @@ class CTCParams(ParamsBase):
     # -------- Training ----------
     class_weights = [0.5, 0.5] #[background, foreground, cell contour]
     learning_rate = 1e-5
-    num_iterations = 100
+    num_iterations = 10000
     validation_interval = 10
     print_to_console_interval = 10
 
