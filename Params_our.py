@@ -31,7 +31,7 @@ class CTCParams(ParamsBase):
     #  ------- Data -------
     data_provider_class = DataHandeling.CTCRAMReaderSequence2D
     root_data_dir = ROOT_DATA_DIR
-    crop_size = (400, 400)  # (height, width) preferably height=width 
+    crop_size = (64, 64)  # (height, width) preferably height=width 
     batch_size = 4
     unroll_len = 4
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
