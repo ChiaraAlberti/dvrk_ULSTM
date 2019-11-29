@@ -101,6 +101,7 @@ class CTCRAMReaderSequence2D(object):
                 raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename[0])))
             img = img.astype(np.float32)
             img = (img - img.mean()) / (img.std())
+            img = cv2.resize(img, (128, 128), interpolation = cv2.INTER_AREA)
             full_seg = 1 if filename[3] is True else 0
             if full_seg == 1:
                 original_size += 1
@@ -115,6 +116,7 @@ class CTCRAMReaderSequence2D(object):
                 seg = np.ones(img.shape[:2]) * (-1)
             elif not full_seg:
                 seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
+                seg = cv2.resize(seg, (128, 128), interpolation = cv2.INTER_AREA)
                 if seg is None:
                     seg = np.ones(img.shape[:2]) * (-1)
                     full_seg = -1
@@ -124,6 +126,7 @@ class CTCRAMReaderSequence2D(object):
                 seg[seg == 0] = -1
             else:
                 seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
+                seg = cv2.resize(seg, (128, 128), interpolation = cv2.INTER_AREA)
             all_images[t] = img
             all_seg[t] = seg
             all_full_seg[t] = full_seg
