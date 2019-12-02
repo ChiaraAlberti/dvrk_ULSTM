@@ -7,11 +7,11 @@ import Networks_our as Nets
 import Params_our as Params
 import DataHandeling_our as DataHandeling
 import sys
-import losses_our as losses
+#import losses_our as losses
 from utils import log_print
 import requests
 import matplotlib.pyplot as plt
-#from tensorflow.python.keras import losses
+from tensorflow.python.keras import losses
 #import cv2
 #import numpy as np
 
