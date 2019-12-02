@@ -130,7 +130,7 @@ def train():
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
-            train_accuracy(label, predictions)
+            train_accuracy(label, softmax)
 #            train_seg_measure(seg_value)
             return softmax, predictions, loss
 
@@ -148,7 +148,7 @@ def train():
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
-            val_accuracy(label, predictions)
+            val_accuracy(label, softmax)
 #            val_seg_measure(seg_value)
             return softmax, predictions, t_loss
 
