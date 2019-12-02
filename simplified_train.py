@@ -69,8 +69,8 @@ def train():
 
         # Losses and Metrics
 
-        ce_loss = losses.WeightedCELoss(params.channel_axis + 1, params.class_weights)
-#        loss_fn = LossFunction()
+#        ce_loss = losses.WeightedCELoss(params.channel_axis + 1, params.class_weights)
+        loss_fn = LossFunction()
 #        seg_measure = losses.seg_measure(params.channel_axis + 1, three_d=False)
         train_loss = k.metrics.Mean(name='train_loss')
 #        train_seg_measure = k.metrics.Mean(name='train_seg_measure')
@@ -119,7 +119,8 @@ def train():
 #                plt.axis('off')
 #                plt.show()
 #                tf.print(softmax)
-                loss = ce_loss(label, predictions)
+#                loss = ce_loss(label, predictions)
+                loss = loss_fn.bce_dice_loss(label, softmax)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
@@ -139,7 +140,8 @@ def train():
 #            print('Labels', label)
 #            print('Predictions', predictions.shape)
 #            print('Softmax', softmax[0,0,:,:,0])
-            t_loss = ce_loss(label, predictions)
+#            t_loss = ce_loss(label, predictions)
+            t_loss = loss_fn.bce_dice_loss(label, softmax)
 
             val_loss(t_loss)
 #            seg_value = seg_measure(label, predictions)
