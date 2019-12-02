@@ -139,7 +139,7 @@ class DownBlock2D(k.Model):
             if data_format == 'NCHW':
                 input_sequence = np.transpose(input_sequence, (0, 4, 1, 2, 3))
             model_out = model(input_sequence, training)
-            print(i, model_out[0].shape, model_out[1].shape)
+#            print(i, model_out[0].shape, model_out[1].shape)
 
 
 class UpBlock2D(k.Model):
@@ -195,7 +195,7 @@ class UpBlock2D(k.Model):
                 input_sequence = np.transpose(input_sequence, (0, 4, 1, 2, 3))
                 skip = np.transpose(skip, (0, 3, 1, 2))
             model_out = model((input_sequence, skip), training)
-            print(i, model_out.shape)
+#            print(i, model_out.shape)
 
 
 class ULSTMnet2D(k.Model):
@@ -261,20 +261,22 @@ class ULSTMnet2D(k.Model):
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
         up_input = out_skip
+#        up_input = up_input - tf.reduce_min(up_input, axis=(1, 2, 3), keepdims=True)
+#        up_input = up_input / tf.reduce_max(up_input, axis=(1, 2, 3), keepdims=True)
+        
         skip_inputs.reverse()
         assert len(skip_inputs) == len(self.UpLayers)
         for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
             up_input = up_layer((up_input, skip_input), training=training, mask=mask)
+        
+        tf.print(up_input[0, :, :, 0])
         logits_output_shape = up_input.shape
         logits_output = tf.reshape(up_input, [input_shape[0], input_shape[1], logits_output_shape[1],
                                               logits_output_shape[2], logits_output_shape[3]])
 
         logits_output = logits_output[crops[0][0]:crops[0][1], crops[1][0]:crops[1][1], crops[2][0]:crops[2][1],
                         crops[3][0]:crops[3][1], crops[4][0]:crops[4][1]]
-#        print(logits_output.shape)
         softmax_output = self.Softmax(logits_output)
-#        print('last_depth', self.last_depth)
-#        print(softmax_output.shape)
         return logits_output, softmax_output
 
     @classmethod
@@ -283,7 +285,7 @@ class ULSTMnet2D(k.Model):
         data_format = 'NHWC'  # 'NCHW'
         training = True
         pad_image = True
-        print(int(pad_image))
+#        print(int(pad_image))
 
         batch_size = 2
         unroll_len = 2
@@ -298,7 +300,7 @@ class ULSTMnet2D(k.Model):
 
             model_out = model(input_sequence, training)
 
-            print(i, model_out[0].shape)
+#            print(i, model_out[0].shape)
 
     def reset_states_per_batch(self, is_last_batch):
         for down_block in self.DownLayers:

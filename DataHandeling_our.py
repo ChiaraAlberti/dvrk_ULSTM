@@ -101,6 +101,7 @@ class CTCRAMReaderSequence2D(object):
             img = cv2.imread(os.path.join(sequence_folder, 'train', filename[0]), -1)
             if img is None:
                 raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename[0])))
+            img = img.astype(np.uint16)
             img = img.astype(np.float32)
             img = (img - img.mean()) / (img.std())
             img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
@@ -550,7 +551,9 @@ class CTCInferenceReader(object):
             file_list_pre.reverse()
             full_file_list = file_list_pre + file_list
             for file in full_file_list:
-                img = cv2.imread(file, -1).astype(np.float32)
+                img = cv2.imread(file, -1).astype(np.uint16)
+                img = img.astype(np.float32)
+                img = cv2.resize(img, (64, 64) , interpolation = cv2.INTER_AREA)
                 if img is None:
                     raise ValueError('Could not read image: {}'.format(file))
                 if normalize:

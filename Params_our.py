@@ -90,7 +90,7 @@ class CTCParams(ParamsBase):
     # -------- Training ----------
 #    class_weights = [0.5, 0.5] #[background, foreground, cell contour]
     learning_rate = 1e-5
-    num_iterations = 1000
+    num_iterations = 100
     validation_interval = 10
     print_to_console_interval = 10
 
@@ -99,7 +99,7 @@ class CTCParams(ParamsBase):
     load_checkpoint_path = ''  # Used only if load_checkpoint is True
     continue_run = False
     save_checkpoint_dir = ROOT_SAVE_DIR
-    save_checkpoint_iteration = 5000
+    save_checkpoint_iteration = 50
     save_checkpoint_every_N_hours = 24
     save_checkpoint_max_to_keep = 5
 
@@ -176,7 +176,7 @@ class CTCParams(ParamsBase):
 class CTCInferenceParams(ParamsBase):
 
     gpu_id = 0  # for CPU ise -1 otherwise gpu id
-    model_path = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2019-11-28_105214' # download from https://drive.google.com/file/d/1uQOdelJoXrffmW_1OCu417nHKtQcH3DJ/view?usp=sharing
+    model_path = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2019-12-02_172435' # download from https://drive.google.com/file/d/1uQOdelJoXrffmW_1OCu417nHKtQcH3DJ/view?usp=sharing
     output_path = '/home/stormlab/seg/Output/sample'
     sequence_path = os.path.join(ROOT_TEST_DATA_DIR, 'tissues')
     filename_format = '*.tif'  # default format for CTC

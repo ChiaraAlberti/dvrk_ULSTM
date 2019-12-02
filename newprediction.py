@@ -11,6 +11,7 @@ from distutils.util import strtobool
 import DataHandeling_our as DataHandeling
 import sys
 from utils import log_print, get_model, bbox_crop, bbox_fill
+import matplotlib.pyplot as plt
 
 __author__ = 'arbellea@post.bgu.ac.il'
 
@@ -44,7 +45,6 @@ def inference():
     try:
         for T, image in enumerate(dataset):
             t = T - params.pre_sequence_frames
-
             image_shape = image.shape
             if len(image_shape) == 2:
                 if params.data_format == 'NCHW':
@@ -55,9 +55,13 @@ def inference():
                 image = tf.reshape(image, [1, 1, image_shape[0], image_shape[1], image_shape[2]])
             else:
                 raise ValueError()
+#            
+#            image = image - tf.reduce_min(image, axis=(1, 2, 3), keepdims=True)
+#            image = image / tf.reduce_max(image, axis=(1, 2, 3), keepdims=True)
+#            plt.imshow(image[0,0, :, :, :])
 
-            _, image_softmax = model(image, training=False)
-            tf.print(image_softmax)
+            _, image_softmax= model(image, training=False)
+#            tf.print(image_softmax)
             image_softmax_np = np.squeeze(image_softmax.numpy(), (0, 1))
             if t < 0:
                 continue
@@ -141,7 +145,7 @@ def inference():
 if __name__ == '__main__':
 
     class AddNets(argparse.Action):
-        import Networks as Nets
+        import Networks_our as Nets
 
         def __init__(self, option_strings, dest, **kwargs):
             super(AddNets, self).__init__(option_strings, dest, **kwargs)
