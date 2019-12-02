@@ -20,7 +20,7 @@ __author__ = 'assafarbelle'
 
 
 class CTCRAMReaderSequence2D(object):
-    def __init__(self, sequence_folder_list, image_crop_size=(128, 128), unroll_len=7, deal_with_end=0, batch_size=4,
+    def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, deal_with_end=0, batch_size=4,
                  queue_capacity=32, num_threads=3,
                  data_format='NCHW', randomize=True, return_dist=False, keep_sample=1, elastic_augmentation=True):
         if not isinstance(image_crop_size, tuple):
@@ -31,6 +31,7 @@ class CTCRAMReaderSequence2D(object):
         self.sequence_folder = sequence_folder_list
         self.elastic_augmentation = elastic_augmentation
         self.sub_seq_size = image_crop_size
+        self.reshape_size = image_reshape_size
         self.dist_sub_seq_size = (2,) + image_crop_size
         self.deal_with_end = deal_with_end
         self.batch_size = batch_size
@@ -86,7 +87,8 @@ class CTCRAMReaderSequence2D(object):
             metadata = pickle.load(fobj)
 
         filename_list = metadata['filelist']
-        img_size = metadata['shape']
+#        img_size = metadata['shape']
+        img_size = self.reshape_size + (metadata['shape'][-1],)
 #        if len(img_size) == 3:
 #            img_size = img_size[1:]
         all_images = np.zeros((len(filename_list), img_size[0], img_size[1], img_size[2]))
@@ -101,7 +103,7 @@ class CTCRAMReaderSequence2D(object):
                 raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename[0])))
             img = img.astype(np.float32)
             img = (img - img.mean()) / (img.std())
-            img = cv2.resize(img, (128, 128), interpolation = cv2.INTER_AREA)
+            img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
             full_seg = 1 if filename[3] is True else 0
             if full_seg == 1:
                 original_size += 1
@@ -116,7 +118,7 @@ class CTCRAMReaderSequence2D(object):
                 seg = np.ones(img.shape[:2]) * (-1)
             elif not full_seg:
                 seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
-                seg = cv2.resize(seg, (128, 128), interpolation = cv2.INTER_AREA)
+                seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
                 if seg is None:
                     seg = np.ones(img.shape[:2]) * (-1)
                     full_seg = -1
@@ -126,7 +128,7 @@ class CTCRAMReaderSequence2D(object):
                 seg[seg == 0] = -1
             else:
                 seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
-                seg = cv2.resize(seg, (128, 128), interpolation = cv2.INTER_AREA)
+                seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
             all_images[t] = img
             all_seg[t] = seg
             all_full_seg[t] = full_seg
@@ -267,7 +269,8 @@ class CTCRAMReaderSequence2D(object):
         try:
             while not self.coord.should_stop():
                 seq_data, sequence_folder = self._read_sequence_data()
-                img_size = seq_data['metadata']['shape']
+#                img_size = seq_data['metadata']['shape']
+                img_size = self.reshape_size + (seq_data['metadata']['shape'][-1],)
                 random_sub_sample = np.random.randint(1, 4) if self.randomize else 0
                 random_reverse = np.random.randint(0, 2) if self.randomize else 0
                 if img_size[0] - self.sub_seq_size[0] > 0:

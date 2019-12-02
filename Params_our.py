@@ -32,6 +32,7 @@ class CTCParams(ParamsBase):
     data_provider_class = DataHandeling.CTCRAMReaderSequence2D
     root_data_dir = ROOT_DATA_DIR
     crop_size = (64, 64)  # (height, width) preferably height=width 
+    reshape_size = (64, 64)
     batch_size = 4
     unroll_len = 4
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
@@ -87,7 +88,7 @@ class CTCParams(ParamsBase):
 
 
     # -------- Training ----------
-    class_weights = [0.5, 0.5] #[background, foreground, cell contour]
+#    class_weights = [0.5, 0.5] #[background, foreground, cell contour]
     learning_rate = 1e-5
     num_iterations = 1000
     validation_interval = 10
@@ -121,6 +122,7 @@ class CTCParams(ParamsBase):
 
         self.train_data_provider = self.data_provider_class(sequence_folder_list=self.root_data_dir,
                                                             image_crop_size=self.crop_size,
+                                                            image_reshape_size = self.reshape_size,
                                                             unroll_len=self.unroll_len,
                                                             deal_with_end=0,
                                                             batch_size=self.batch_size,
@@ -132,6 +134,7 @@ class CTCParams(ParamsBase):
                                                             )
         self.val_data_provider = self.data_provider_class(sequence_folder_list=self.root_data_dir,
                                                           image_crop_size=self.crop_size,
+                                                          image_reshape_size = self.reshape_size, 
                                                           unroll_len=self.unroll_len,
                                                           deal_with_end=0,
                                                           batch_size=self.batch_size,
