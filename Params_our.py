@@ -176,10 +176,11 @@ class CTCParams(ParamsBase):
 class CTCInferenceParams(ParamsBase):
 
     gpu_id = 0  # for CPU ise -1 otherwise gpu id
-    model_path = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2019-12-03_101800' # download from https://drive.google.com/file/d/1uQOdelJoXrffmW_1OCu417nHKtQcH3DJ/view?usp=sharing
+    model_path = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2019-12-03_104028' # download from https://drive.google.com/file/d/1uQOdelJoXrffmW_1OCu417nHKtQcH3DJ/view?usp=sharing
     output_path = '/home/stormlab/seg/Output/sample'
     sequence_path = os.path.join(ROOT_TEST_DATA_DIR, 'tissues')
     filename_format = '*.tif'  # default format for CTC
+    reshape_size = (64, 64)
 
     data_reader = DataHandeling.CTCInferenceReader
     data_format = 'NHWC'  # 'NCHW' or 'NHWC'

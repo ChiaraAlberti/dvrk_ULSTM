@@ -553,7 +553,6 @@ class CTCInferenceReader(object):
             for file in full_file_list:
                 img = cv2.imread(file, -1).astype(np.uint16)
                 img = img.astype(np.float32)
-                img = cv2.resize(img, (64, 64) , interpolation = cv2.INTER_AREA)
                 if img is None:
                     raise ValueError('Could not read image: {}'.format(file))
                 if normalize:

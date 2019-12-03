@@ -46,23 +46,25 @@ def inference():
         for T, image in enumerate(dataset):
             t = T - params.pre_sequence_frames
             image_shape = image.shape
+            dim_original = image.get_shape().as_list()
+            image = tf.image.resize(image, params.reshape_size)
             if len(image_shape) == 2:
                 if params.data_format == 'NCHW':
                     image = tf.reshape(image, [1, 1, 1, image_shape[0], image_shape[1]])
                 else:
                     image = tf.reshape(image, [1, 1, image_shape[0], image_shape[1], 1])
             elif len(image_shape) == 3:
-                image = tf.reshape(image, [1, 1, image_shape[0], image_shape[1], image_shape[2]])
+                image = tf.reshape(image, [1, 1, params.reshape_size[0], params.reshape_size[1], image_shape[2]])
             else:
                 raise ValueError()
 #            
 #            image = image - tf.reduce_min(image, axis=(1, 2, 3), keepdims=True)
 #            image = image / tf.reduce_max(image, axis=(1, 2, 3), keepdims=True)
 #            plt.imshow(image[0,0, :, :, :])
-
             _, image_softmax= model(image, training=False)
-            tf.print(image_softmax)
             image_softmax_np = np.squeeze(image_softmax.numpy(), (0, 1))
+            image_softmax_np = cv2.resize(image_softmax_np, tuple(dim_original[:2]) , interpolation = cv2.INTER_AREA)
+
             if t < 0:
                 continue
 
@@ -111,7 +113,7 @@ def inference():
                     if params.data_format == 'NCHW':
                         image_softmax_np = np.transpose(image_softmax_np, (1, 2, 0))
                     out_fname = base_out_temp_vis_fname.format(time=t)
-                    sigoutnp_vis = np.flip(np.round(image_softmax_np * (2 ** 16 - 1)).astype(np.uint16), 2)
+                    sigoutnp_vis = np.round(image_softmax_np * (2 ** 16 - 1)).astype(np.uint16)
                     cv2.imwrite(filename=out_fname, img=sigoutnp_vis.astype(np.uint16))
                     log_print("Saved File: {}".format(out_fname))
 
@@ -191,9 +193,10 @@ if __name__ == '__main__':
                             help="Path to sequence images. Folder should contain image files")
     arg_parser.add_argument('--filename_format', dest='filename_format', type=str,
                             help="Format of file using wildcard (*) to indicate timestep. Default: 't*.tif'")
+    arg_parser.add_argument('--reshape_size', dest='reshape_size', type=int, nargs=2,
+                            help="Reshape size")
     arg_parser.add_argument('--data_format', dest='data_format', type=str, choices=['NCHW', 'NWHC'],
                             help="Data format NCHW or NHWC")
-
     arg_parser.add_argument('--min_cell_size', dest='min_cell_size', type=int,
                             help="Minimum cell size")
     arg_parser.add_argument('--max_cell_size', dest='max_cell_size', type=int,
