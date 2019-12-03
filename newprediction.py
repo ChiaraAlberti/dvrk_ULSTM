@@ -61,7 +61,7 @@ def inference():
 #            plt.imshow(image[0,0, :, :, :])
 
             _, image_softmax= model(image, training=False)
-#            tf.print(image_softmax)
+            tf.print(image_softmax)
             image_softmax_np = np.squeeze(image_softmax.numpy(), (0, 1))
             if t < 0:
                 continue

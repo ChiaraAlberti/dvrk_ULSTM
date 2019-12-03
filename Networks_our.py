@@ -226,7 +226,8 @@ class ULSTMnet2D(k.Model):
             self.UpLayers.append(UpBlock2D(conv_filters, up_factor, data_format,
                                            return_logits=layer_ind + 1 == len(net_params['up_conv_kernels'])))
             self.last_depth = conv_filters[-1][1]
-        self.Softmax = k.layers.Softmax(self.channel_axis+1)
+#        self.Softmax = k.layers.Softmax(self.channel_axis+1)
+#        self.Sigmoid = k.activations.sigmoid()
 
     def call(self, inputs, training=None, mask=None):
         input_shape = inputs.shape
@@ -269,15 +270,15 @@ class ULSTMnet2D(k.Model):
         for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
             up_input = up_layer((up_input, skip_input), training=training, mask=mask)
         
-        tf.print(up_input[0, :, :, 0])
+#        tf.print(up_input[0, :, :, 0])
         logits_output_shape = up_input.shape
         logits_output = tf.reshape(up_input, [input_shape[0], input_shape[1], logits_output_shape[1],
                                               logits_output_shape[2], logits_output_shape[3]])
 
         logits_output = logits_output[crops[0][0]:crops[0][1], crops[1][0]:crops[1][1], crops[2][0]:crops[2][1],
                         crops[3][0]:crops[3][1], crops[4][0]:crops[4][1]]
-        softmax_output = self.Softmax(logits_output)
-        return logits_output, softmax_output
+        output = k.activations.sigmoid(logits_output)
+        return logits_output, output
 
     @classmethod
     def unit_test(cls):
