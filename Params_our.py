@@ -43,48 +43,48 @@ class CTCParams(ParamsBase):
 
     # -------- Network Architecture ----------
     net_model = Nets.ULSTMnet2D
-#    net_kernel_params = {
-#        'down_conv_kernels': [
-#            [(3, 128), (3, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
-#            [(3, 256), (3, 256)],
-#            [(3, 256), (3, 256)],
-#            [(3, 512), (3, 512)],
-#        ],
-#        'lstm_kernels': [
-#            [(5, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many C-LSTMs in each layer
-#            [(5, 256)],
-#            [(5, 256)],
-#            [(5, 512)],
-#        ],
-#        'up_conv_kernels': [
-#            [(3, 256), (3, 256)],   # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
-#            [(3, 128), (3, 128)],
-#            [(3, 64), (3, 64)],
-#            [(3, 32), (3, 32), (1, 3)],
-#        ],
-#
-#    }
-    
     net_kernel_params = {
         'down_conv_kernels': [
-            [(5, 64), (5, 64)],
-            [(5, 128), (5, 128)],
-            [(5, 128), (5, 128)],
-            [(5, 256), (5, 256)],
+            [(3, 100), (3, 100)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
+            [(3, 200), (3, 200)],
+            [(3, 200), (3, 200)],
+            [(3, 400), (3, 400)],
         ],
         'lstm_kernels': [
-            [(5, 64)],
-            [(5, 128)],
-            [(5, 128)],
-            [(5, 256)],
+            [(5, 100)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many C-LSTMs in each layer
+            [(5, 200)],
+            [(5, 200)],
+            [(5, 400)],
         ],
         'up_conv_kernels': [
-            [(5, 128), (5, 128)],
-            [(5, 64), (5, 64)],
-            [(5, 32), (5, 32)],
-            [(5, 16), (5, 16), (1, 1)],
+            [(3, 200), (3, 200)],   # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
+            [(3, 100), (3, 100)],
+            [(3, 50), (3, 50)],
+            [(3, 25), (3, 25), (1, 1)],
         ],
+
     }
+    
+#    net_kernel_params = {
+#        'down_conv_kernels': [
+#            [(5, 64), (5, 64)],
+#            [(5, 128), (5, 128)],
+#            [(5, 128), (5, 128)],
+#            [(5, 256), (5, 256)],
+#        ],
+#        'lstm_kernels': [
+#            [(5, 64)],
+#            [(5, 128)],
+#            [(5, 128)],
+#            [(5, 256)],
+#        ],
+#        'up_conv_kernels': [
+#            [(5, 128), (5, 128)],
+#            [(5, 64), (5, 64)],
+#            [(5, 32), (5, 32)],
+#            [(5, 16), (5, 16), (1, 1)],
+#        ],
+#    }
 
 
     # -------- Training ----------
@@ -99,7 +99,7 @@ class CTCParams(ParamsBase):
     load_checkpoint_path = ''  # Used only if load_checkpoint is True
     continue_run = False
     save_checkpoint_dir = ROOT_SAVE_DIR
-    save_checkpoint_iteration = 100
+    save_checkpoint_iteration = 50
     save_checkpoint_every_N_hours = 24
     save_checkpoint_max_to_keep = 5
 

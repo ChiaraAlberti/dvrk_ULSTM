@@ -48,8 +48,10 @@ class LossFunction:
         return loss
 
     def bce_dice_loss(self, y_true, y_pred):
-        loss = losses.binary_crossentropy(y_true, y_pred) + self.dice_loss(y_true, y_pred)
-        return loss
+        bce_loss = losses.binary_crossentropy(y_true, y_pred)
+        dice_loss = self.dice_loss(y_true, y_pred)
+        loss = bce_loss + dice_loss
+        return loss, dice_loss, bce_loss
 
 
 def train():
@@ -73,6 +75,8 @@ def train():
         loss_fn = LossFunction()
 #        seg_measure = losses.seg_measure(params.channel_axis + 1, three_d=False)
         train_loss = k.metrics.Mean(name='train_loss')
+        train_bce_loss = k.metrics.Mean(name='bce_loss')
+        train_dice_loss = k.metrics.Mean(name='dice_loss')
 #        train_seg_measure = k.metrics.Mean(name='train_seg_measure')
         train_accuracy = k.metrics.SparseCategoricalAccuracy(name='train_accuracy')
 
@@ -108,31 +112,29 @@ def train():
                                              keep_checkpoint_every_n_hours=params.save_checkpoint_every_N_hours)
 
         @tf.function
-        def train_step(image, label): #maybe it is possible to change directly here the image format
+        def train_step(image, label): 
             with tf.GradientTape() as tape:
                 predictions, softmax = model(image, True)
+#                tf.print(softmax)
 #                model.summary()
-#                print('Labels', label.shape)
 #                print('Predictions', predictions.shape)
 #                print('Softmax', softmax.shape)
-#                plt.imshow(softmax[0,0,:,:,:])
-#                plt.axis('off')
-#                plt.show()
-#                tf.print(softmax)
 #                loss = ce_loss(label, predictions)
-                loss = loss_fn.bce_dice_loss(label, softmax)
+                loss, dice_loss, bce_loss = loss_fn.bce_dice_loss(label, softmax)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
             ckpt.step.assign_add(1)
             train_loss(loss)
+            train_dice_loss(dice_loss)
+            train_bce_loss(bce_loss)
 #            seg_value = seg_measure(label, predictions)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             train_accuracy(label, softmax)
 #            train_seg_measure(seg_value)
-            return softmax, predictions, loss
+            return softmax, predictions, loss, dice_loss, bce_loss
 
         @tf.function
         def val_step(image, label):
@@ -141,7 +143,7 @@ def train():
 #            print('Predictions', predictions.shape)
 #            print('Softmax', softmax[0,0,:,:,0])
 #            t_loss = ce_loss(label, predictions)
-            t_loss = loss_fn.bce_dice_loss(label, softmax)
+            t_loss, t_dice_loss, t_bce_loss = loss_fn.bce_dice_loss(label, softmax)
 
             val_loss(t_loss)
 #            seg_value = seg_measure(label, predictions)
@@ -161,7 +163,7 @@ def train():
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
 #            train_scalars_dict = {'Loss': train_loss, 'SEG': train_seg_measure}
 #            val_scalars_dict = {'Loss': val_loss, 'SEG': val_seg_measure}
-            train_scalars_dict = {'Loss': train_loss}
+            train_scalars_dict = {'Loss': train_loss,'Dice_loss': train_dice_loss, 'Bce loss': train_bce_loss}
             val_scalars_dict = {'Loss': val_loss}
 
         def tboard(writer, step, scalar_loss_dict, images_dict):
@@ -187,10 +189,13 @@ def train():
                         raise AWSError('Quitting Spot Instance Gracefully')
 
                 image_sequence, seg_sequence, _, is_last_batch = train_data_provider.get_batch()
+                print(seg_sequence.dtype)
                 
                 if params.profile:
                     tf.summary.trace_on(graph=True, profiler=True)
-                train_output_sequence, train_predictions, train_loss_value = train_step(image_sequence, seg_sequence)
+                train_output_sequence, train_predictions, train_loss_value, train_dice_loss_value, train_bce_loss_value = train_step(image_sequence, seg_sequence)
+                print(tf.reduce_min(train_output_sequence))
+                print(tf.reduce_max(train_output_sequence))
 
                 # q_stats = [qs().numpy() for qs in params.train_data_provider.q_stat_list]
                 # print(q_stats)
@@ -209,7 +214,6 @@ def train():
 #                        if params.channel_axis == 1:
 #                            seg_onehot = tf.transpose(seg_onehot, (0, 3, 1, 2))
                         display_image = image_sequence[:, -1]
-                        print(display_image.shape)
                         display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
                         display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
                         train_imgs_dict['Image'] = display_image

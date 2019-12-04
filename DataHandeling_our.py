@@ -574,6 +574,4 @@ class CTCInferenceReader(object):
 
 
 if __name__ == "__main__":
-    CTCSegReaderSequence3D.unit_test()
-    # LSCRAMReader2D.unit_test()
-    # CTCInferenceReader.unit_test()
+    CTCInferenceReader.unit_test()
