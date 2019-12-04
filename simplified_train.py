@@ -187,10 +187,6 @@ def train():
                         raise AWSError('Quitting Spot Instance Gracefully')
 
                 image_sequence, seg_sequence, _, is_last_batch = train_data_provider.get_batch()
-#                print(np.max(image_sequence[0,0,:, :, 0]))
-#                print(np.min(image_sequence[0,0,:, :, 0]))
-#                plt.imshow(image_sequence[0,0, :,:, :])
-#                show_batch(batch_of_imgs)
                 
                 if params.profile:
                     tf.summary.trace_on(graph=True, profiler=True)
@@ -207,16 +203,17 @@ def train():
                 if not int(ckpt.step) % params.write_to_tb_interval:
                     if not params.dry_run:
 
-                        seg_onehot = tf.one_hot(tf.cast(tf.squeeze(seg_sequence[:, -1], params.channel_axis), tf.int32),
-                                                depth=2)
+#                        seg_onehot = tf.one_hot(tf.cast(tf.squeeze(seg_sequence[:, -1], params.channel_axis), tf.int32),
+#                                                depth=2)
 #                        seg_onehot = tf.one_hot(tf.cast(seg_sequence[:, -1], tf.int32), depth=3)
-                        if params.channel_axis == 1:
-                            seg_onehot = tf.transpose(seg_onehot, (0, 3, 1, 2))
+#                        if params.channel_axis == 1:
+#                            seg_onehot = tf.transpose(seg_onehot, (0, 3, 1, 2))
                         display_image = image_sequence[:, -1]
+                        print(display_image.shape)
                         display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
                         display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
                         train_imgs_dict['Image'] = display_image
-                        train_imgs_dict['GT'] = seg_onehot
+                        train_imgs_dict['GT'] = seg_sequence[:, -1]
                         train_imgs_dict['Output'] = train_output_sequence[:, -1]
                         tboard(train_summary_writer, int(ckpt.step), train_scalars_dict, train_imgs_dict)
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))

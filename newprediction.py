@@ -10,8 +10,8 @@ from Params_our import CTCInferenceParams
 from distutils.util import strtobool
 import DataHandeling_our as DataHandeling
 import sys
-from utils import log_print, get_model, bbox_crop, bbox_fill
-import matplotlib.pyplot as plt
+from utils import log_print, get_model
+
 
 __author__ = 'arbellea@post.bgu.ac.il'
 
