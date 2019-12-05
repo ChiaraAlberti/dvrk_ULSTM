@@ -22,7 +22,7 @@ __author__ = 'assafarbelle'
 class CTCRAMReaderSequence2D(object):
     def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, deal_with_end=0, batch_size=4,
                  queue_capacity=32, num_threads=3,
-                 data_format='NCHW', randomize=True, return_dist=False, keep_sample=1, elastic_augmentation=True):
+                 data_format='NCHW', randomize=True, return_dist=False, keep_sample=1, elastic_augmentation=False):
         if not isinstance(image_crop_size, tuple):
             image_crop_size = tuple(image_crop_size)
         self.coord = None
@@ -125,8 +125,7 @@ class CTCRAMReaderSequence2D(object):
                     full_seg = -1
 
                 else:
-                    seg = seg.astype(np.float32)
-                seg[seg == 0] = -1
+                    seg[seg == 0] = -1
             else:
                 seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
                 seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
@@ -180,14 +179,15 @@ class CTCRAMReaderSequence2D(object):
     def _get_transformed_image_(image, affine_matrix, indices, seg=False):
 
         shape = image.shape
-        if seg:
-            trans_img = cv2.warpAffine(image, affine_matrix, shape[::-1], borderMode=cv2.BORDER_CONSTANT,
-                                       borderValue=-1, flags=cv2.INTER_NEAREST)
-            trans_coord = map_coordinates(trans_img, indices, order=0, mode='constant', cval=-1).reshape(shape)
-        else:
-            trans_img = cv2.warpAffine(image, affine_matrix, shape[::-1], borderMode=cv2.BORDER_REFLECT_101)
-            trans_coord = map_coordinates(trans_img, indices, order=1, mode='reflect').reshape(shape)
-
+#        if seg:
+#            trans_img = cv2.warpAffine(image, affine_matrix, shape[::-1], borderMode=cv2.BORDER_CONSTANT,
+#                                       borderValue=-1, flags=cv2.INTER_NEAREST)
+#            trans_coord = map_coordinates(trans_img, indices, order=0, mode='constant', cval=-1).reshape(shape)
+#        else:
+#            trans_img = cv2.warpAffine(image, affine_matrix, shape[::-1], borderMode=cv2.BORDER_REFLECT_101)
+#            trans_coord = map_coordinates(trans_img, indices, order=1, mode='reflect').reshape(shape)
+        trans_img = cv2.warpAffine(image, affine_matrix, shape[::-1], borderMode=cv2.BORDER_REFLECT_101)
+        trans_coord = map_coordinates(trans_img, indices, order=1, mode='reflect').reshape(shape)
         return trans_coord
 
     @staticmethod
@@ -345,27 +345,28 @@ class CTCRAMReaderSequence2D(object):
                         if np.any(np.isinf(img_crop)):
                             raise ValueError('Inf in image {} from sequence: {}'.format(file_idx, sequence_folder))
                         if not np.equal(seg_crop, -1).all():
-                            seg_not_valid = np.equal(seg_crop, -1)
-                            labeled_gt = seg_crop
-                            labeled_gt[:, 0] = 0
-                            labeled_gt[:, -1] = 0
-                            labeled_gt[-1, :] = 0
-                            labeled_gt[0, :] = 0
-                            trans_seg = self._get_transformed_image_(labeled_gt.astype(np.float32), affine_matrix,
+#                            seg_not_valid = np.equal(seg_crop, -1)
+#                            labeled_gt = seg_crop
+#                            labeled_gt[:, 0] = 0
+#                            labeled_gt[:, -1] = 0
+#                            labeled_gt[-1, :] = 0
+#                            labeled_gt[0, :] = 0imard20
+                            trans_seg = self._get_transformed_image_(seg_crop.astype(np.float32), affine_matrix,
                                                                      indices, seg=True)
-                            trans_not_valid = self._get_transformed_image_(seg_not_valid.astype(np.float32),
-                                                                           affine_matrix,
-                                                                           indices, seg=True)
-                            trans_seg_fix = self._fix_transformed_segmentation(trans_seg)
-                            trans_not_valid = np.logical_or(np.greater(trans_not_valid, 0.5), np.equal(trans_seg, -1))
-                            seg_crop = trans_seg_fix
-                            seg_crop[trans_not_valid] = -1
+#                            trans_not_valid = self._get_transformed_image_(seg_not_valid.astype(np.float32),
+#                                                                           affine_matrix,
+#                                                                           indices, seg=True)
+#                            trans_seg_fix = self._fix_transformed_segmentation(trans_seg)
+#                            trans_not_valid = np.logical_or(np.greater(trans_not_valid, 0.5), np.equal(trans_seg, -1))
+#                            seg_crop = trans_seg_fix
+#                            seg_crop[trans_not_valid] = 0
                             if np.any(np.isnan(seg_crop)):
                                 raise ValueError('NaN in Seg {} from sequence: {}'.format(file_idx, sequence_folder))
                             if np.any(np.isinf(seg_crop)):
                                 raise ValueError('Inf in Seg {} from sequence: {}'.format(file_idx, sequence_folder))
                     else:
-                        seg_crop = self._fix_transformed_segmentation(seg_crop)
+#                        seg_crop = self._fix_transformed_segmentation(seg_crop)
+                        seg_crop = seg_crop.astype(np.float32)/255
                     if flip[0]:
                         img_crop = cv2.flip(img_crop, 0)
                         seg_crop = cv2.flip(seg_crop, 0)

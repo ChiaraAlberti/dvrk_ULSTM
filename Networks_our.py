@@ -206,6 +206,7 @@ class ULSTMnet2D(k.Model):
         self.DownLayers = []
         self.UpLayers = []
         self.total_stride = 1
+        self.pool_size =2
         self.pad_image = pad_image
 
         if not len(net_params['down_conv_kernels']) == len(net_params['lstm_kernels']):
@@ -220,7 +221,7 @@ class ULSTMnet2D(k.Model):
             stride = 2 if layer_ind < len(net_params['down_conv_kernels']) - 1 else 1
             self.DownLayers.append(DownBlock2D(conv_filters, lstm_filters, stride, data_format))
             self.total_stride *= self.DownLayers[-1].total_stride
-
+        
         for layer_ind, conv_filters in enumerate(net_params['up_conv_kernels']):
             up_factor = 2 if layer_ind > 0 else 1
             self.UpLayers.append(UpBlock2D(conv_filters, up_factor, data_format,
@@ -261,6 +262,8 @@ class ULSTMnet2D(k.Model):
         for down_layer in self.DownLayers:
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
+#            out_skip = k.layers.MaxPooling2D((self.pool_size, self.pool_size))
+#            out_skip = k.layers.Dropout(0.3)
         up_input = out_skip
 #        up_input = up_input - tf.reduce_min(up_input, axis=(1, 2, 3), keepdims=True)
 #        up_input = up_input / tf.reduce_max(up_input, axis=(1, 2, 3), keepdims=True)
@@ -268,6 +271,7 @@ class ULSTMnet2D(k.Model):
         skip_inputs.reverse()
         assert len(skip_inputs) == len(self.UpLayers)
         for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
+#            up_input = k.layers.Dropout(0.3)
             up_input = up_layer((up_input, skip_input), training=training, mask=mask)
         
 #        tf.print(up_input[0, :, :, 0])

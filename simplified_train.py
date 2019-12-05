@@ -189,13 +189,14 @@ def train():
                         raise AWSError('Quitting Spot Instance Gracefully')
 
                 image_sequence, seg_sequence, _, is_last_batch = train_data_provider.get_batch()
-                print(seg_sequence.dtype)
+                print(tf.reduce_min(seg_sequence))
+                print(tf.reduce_max(seg_sequence))
                 
                 if params.profile:
                     tf.summary.trace_on(graph=True, profiler=True)
                 train_output_sequence, train_predictions, train_loss_value, train_dice_loss_value, train_bce_loss_value = train_step(image_sequence, seg_sequence)
-                print(tf.reduce_min(train_output_sequence))
-                print(tf.reduce_max(train_output_sequence))
+#                print(tf.reduce_min(train_output_sequence))
+#                print(tf.reduce_max(train_output_sequence))
 
                 # q_stats = [qs().numpy() for qs in params.train_data_provider.q_stat_list]
                 # print(q_stats)
