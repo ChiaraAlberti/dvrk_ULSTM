@@ -89,7 +89,7 @@ class CTCParams(ParamsBase):
 
     # -------- Training ----------
     learning_rate = 1e-5
-    num_iterations = 1000
+    num_iterations = 10000
     validation_interval = 10
     print_to_console_interval = 10
 
@@ -130,7 +130,6 @@ class CTCParams(ParamsBase):
                                                             queue_capacity=self.train_q_capacity,
                                                             data_format=self.data_format,
                                                             randomize=True,
-                                                            return_dist=False,
                                                             num_threads=self.num_train_threads
                                                             )
         self.val_data_provider = self.data_provider_class(sequence_folder_list=self.root_data_dir,
@@ -142,7 +141,6 @@ class CTCParams(ParamsBase):
                                                           queue_capacity=self.train_q_capacity,
                                                           data_format=self.data_format,
                                                           randomize=True,
-                                                          return_dist=False,
                                                           num_threads=self.num_val_threads
                                                           )
 

@@ -9,11 +9,10 @@ import numpy as np
 import pickle
 import utils
 import time
-from scipy.ndimage.morphology import distance_transform_edt
+import scipy
+import random
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
-from scipy.ndimage.morphology import binary_dilation
-from scipy.ndimage import grey_dilation, affine_transform  # measurements, grey_erosion
 
 
 __author__ = 'assafarbelle'
@@ -22,7 +21,7 @@ __author__ = 'assafarbelle'
 class CTCRAMReaderSequence2D(object):
     def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, deal_with_end=0, batch_size=4,
                  queue_capacity=32, num_threads=3,
-                 data_format='NCHW', randomize=True, return_dist=False, keep_sample=1, elastic_augmentation=False):
+                 data_format='NCHW', randomize=True, elastic_augmentation=False):
         if not isinstance(image_crop_size, tuple):
             image_crop_size = tuple(image_crop_size)
         self.coord = None
@@ -38,15 +37,12 @@ class CTCRAMReaderSequence2D(object):
         self.queue_capacity = queue_capacity
         self.data_format = data_format
         self.randomize = randomize
-        self.return_dist = return_dist
         self.num_threads = num_threads
-        self.keep_sample = keep_sample
 
         self.q_list, self.q_stat_list = self._create_queues()
         np.random.seed(1)
 
     def _read_sequence_to_ram_(self):
-        train_set = True
         sequence_folder = self.sequence_folder
         utils.log_print('Reading Sequence')
         with open(os.path.join(sequence_folder, 'lstm_baseline_ds_bw.pkl'), 'rb') as fobj:
@@ -62,10 +58,6 @@ class CTCRAMReaderSequence2D(object):
             all_images = np.zeros((len(filename_list), img_size[0], img_size[1]))
 
         all_seg = np.zeros((len(filename_list), img_size[0], img_size[1]))
-        all_full_seg = np.zeros((len(filename_list)))
-        keep_rate = self.keep_sample
-        original_size = 0
-        downampled_size = 0
         for t, filename in enumerate(filename_list):
             img = cv2.imread(os.path.join(sequence_folder, 'train_bw', filename[0]), -1)
             if img is None:
@@ -74,39 +66,14 @@ class CTCRAMReaderSequence2D(object):
             img = img.astype(np.float32)
             img = (img - img.mean()) / (img.std())
             img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
-            full_seg = 1 if filename[3] is True else 0
-            if full_seg == 1:
-                original_size += 1
-
-            keep_seg = (np.random.rand() < keep_rate) and train_set
-
-            full_seg = full_seg if keep_seg else 0
-            if full_seg == 1:
-                downampled_size += 1
-
-            if filename[1] is None or not keep_seg:
-                seg = np.ones(img.shape[:2]) * (-1)
-            elif not full_seg:
-                seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
-                seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
-                if seg is None:
-                    seg = np.ones(img.shape[:2]) * (-1)
-                    full_seg = -1
-
-                else:
-                    seg[seg == 0] = -1
-            else:
-                seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
-                seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
+            seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
+            seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
+            if seg is None:
+                raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename[1])))
             all_images[t] = img
             all_seg[t] = seg
-            all_full_seg[t] = full_seg
-        if keep_rate < 1:
-            print('Downsampling Training Segmentaiont with rate:{}. Original set size: {}. '
-                  'Downsampled set size: {}'.format(keep_rate, original_size, downampled_size))
 
-        self.sequence_data[sequence_folder] = {'images': np.array(all_images), 'segs': np.array(all_seg),
-                                                    'full_seg': all_full_seg, 'metadata': metadata}
+        self.sequence_data[sequence_folder] = {'images': np.array(all_images), 'segs': np.array(all_seg), 'metadata': metadata}
 
     def _read_sequence_data(self):
         sequence_folder = self.sequence_folder
@@ -146,15 +113,7 @@ class CTCRAMReaderSequence2D(object):
 
     @staticmethod
     def _get_transformed_image_(image, affine_matrix, indices, seg=False):
-
         shape = image.shape
-#        if seg:
-#            trans_img = cv2.warpAffine(image, affine_matrix, shape[::-1], borderMode=cv2.BORDER_CONSTANT,
-#                                       borderValue=-1, flags=cv2.INTER_NEAREST)
-#            trans_coord = map_coordinates(trans_img, indices, order=0, mode='constant', cval=-1).reshape(shape)
-#        else:
-#            trans_img = cv2.warpAffine(image, affine_matrix, shape[::-1], borderMode=cv2.BORDER_REFLECT_101)
-#            trans_coord = map_coordinates(trans_img, indices, order=1, mode='reflect').reshape(shape)
         trans_img = cv2.warpAffine(image, affine_matrix, shape[::-1], borderMode=cv2.BORDER_REFLECT_101)
         trans_coord = map_coordinates(trans_img, indices, order=1, mode='reflect').reshape(shape)
         return trans_coord
@@ -169,77 +128,34 @@ class CTCRAMReaderSequence2D(object):
         indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
 
         return indices
-
-    @staticmethod
-    def _fix_transformed_segmentation(trans_seg):
-        # separate close blobs with the edge of transformation
-        # edge is pixels that get fractional value after transofrmation
-        strel = np.zeros((3, 3))
-        trans_seg = np.round(trans_seg)
-        # region_props = skimage.measure.regionprops(trans_seg)
-        # errosion = grey_erosion(trans_seg, np.zeros(3, 3, 3))
-        dilation = grey_dilation(trans_seg.astype(np.int32), structure=strel.astype(np.int8))
-        bw = np.minimum(trans_seg, 1)
-        bw[np.logical_and(np.not_equal(trans_seg, dilation), np.greater(dilation, 0))] = 2
-
-        return bw
-
-    @staticmethod
-    def _gt2dist_(gt_image):
-        gt_fg = gt_image == 1
-        _, labeled_gt = cv2.connectedComponents(gt_fg.astype(np.uint8))
-        im_shape = gt_image.shape
-        dist_1 = np.ones_like(gt_image) * (im_shape[0] + im_shape[1]) + 2.
-        dist_2 = dist_1 + 1.
-
-        for label in np.unique(labeled_gt):
-            if label == 0:
-                continue
-            bw = np.equal(labeled_gt, label).astype(np.float32)
-            bw_erode = cv2.erode(bw, np.ones((3, 3)))
-            edge = np.logical_and(np.logical_not(bw_erode), bw)
-
-            dist = distance_transform_edt(np.logical_not(edge))
-            is_first_dist = np.less(dist, dist_1)
-            dist_2[is_first_dist] = dist_1[is_first_dist]
-            is_second_dist = np.logical_and(np.less(dist, dist_2), np.logical_not(is_first_dist))
-
-            dist_1[is_first_dist] = dist[is_first_dist]
-            dist_2[is_second_dist] = dist[is_second_dist]
-        out = np.stack((dist_1, dist_2), 0)
-
-        return out, (dist_1, dist_2)
+    
+    def shift_img(self, image, width_shift_range, height_shift_range, img_shape):
+        """This fn will perform the horizontal or vertical shift"""
+        if width_shift_range or height_shift_range:
+            if width_shift_range:
+                width_shift_range = random.uniform(-width_shift_range * img_shape[1], width_shift_range * img_shape[1])
+            if height_shift_range:
+                height_shift_range = random.uniform(-height_shift_range * img_shape[1], height_shift_range * img_shape[1])
+            # Translate both
+            img = scipy.ndimage.shift(image, [width_shift_range, height_shift_range])
+            return img
 
     @staticmethod
     def _adjust_brightness_(image, delta):
-        """
-        Args:
-        image (numpy.ndarray)
-        delta
-        """
-
         out_img = image + delta
         return out_img
 
     @staticmethod
     def _adjust_contrast_(image, factor):
-        """
-        Args:
-        image (numpy.ndarray)
-        factor
-        """
-
         img_mean = image.mean()
         out_img = (image - img_mean) * factor + img_mean
         return out_img
 
     def _load_and_enqueue(self, q, q_stat):
-        dist_crop = None
         unroll_len = self.unroll_len
         try:
             while not self.coord.should_stop():
                 seq_data, sequence_folder = self._read_sequence_data()
-#                img_size = seq_data['metadata']['shape']
                 if len(seq_data['metadata']['shape'])==3:
                     img_size = self.reshape_size + (seq_data['metadata']['shape'][-1],)
                 else:
@@ -290,8 +206,6 @@ class CTCRAMReaderSequence2D(object):
                 seg_crops = seq_data['segs'][:, crop_y:crop_y_stop, crop_x:crop_x_stop]
                 processed_image = []
                 processed_seg = []
-                full_seg_seq = []
-                processed_dist = []
                 is_last = []
                 all_fnames = []
                 for t, file_idx in enumerate(filename_idx):
@@ -299,7 +213,6 @@ class CTCRAMReaderSequence2D(object):
                     filename = seq_data['metadata']['filelist'][file_idx][0]
                     img_crop = img_crops[file_idx].copy()
                     seg_crop = seg_crops[file_idx].copy()
-                    full_seg = seq_data['full_seg'][file_idx]
                     if self.randomize:
                         # contrast factor between [0.5, 1.5]
                         random_constrast_factor = np.random.rand() + 0.5
@@ -323,7 +236,7 @@ class CTCRAMReaderSequence2D(object):
 #                            labeled_gt[:, -1] = 0
 #                            labeled_gt[-1, :] = 0
 #                            labeled_gt[0, :] = 0imard20
-                            trans_seg = self._get_transformed_image_(seg_crop.astype(np.float32), affine_matrix,
+                            seg_crop = self._get_transformed_image_(seg_crop.astype(np.float32), affine_matrix,
                                                                      indices, seg=True)
 #                            trans_not_valid = self._get_transformed_image_(seg_not_valid.astype(np.float32),
 #                                                                           affine_matrix,
@@ -348,13 +261,9 @@ class CTCRAMReaderSequence2D(object):
                     if rotate > 0:
                         img_crop = np.rot90(img_crop, rotate)
                         seg_crop = np.rot90(seg_crop, rotate)
-                    if self.return_dist:
-                        if full_seg == -1:
-                            dist_crop = np.zeros(self.dist_sub_seq_size)
-                        else:
-                            dist_crop, _ = self._gt2dist_(seg_crop)
-                        all_times.append(time.time())
-                        processed_dist.append(dist_crop)
+                    
+                    img_crop = self.shift_img(img_crop, 0.1, 0.1, img_crop.shape)
+                    seg_crop = self.shift_img(seg_crop,0.1, 0.1, seg_crop.shape)
                     is_last_frame = 1. if (t + 1) < len(filename_idx) else 0.
                     if self.num_threads == 1:
                         try:
@@ -363,12 +272,7 @@ class CTCRAMReaderSequence2D(object):
                                 if self.coord.should_stop():
                                     return
                                 time.sleep(1)
-
-                            if self.return_dist:
-                                q.enqueue(
-                                    [img_crop, seg_crop, max(0, full_seg), is_last_frame, filename, dist_crop])
-                            else:
-                                q.enqueue([img_crop, seg_crop, max(0, full_seg), is_last_frame, filename])
+                            q.enqueue([img_crop, seg_crop, is_last_frame, filename])
 
                         except tf.errors.CancelledError:
                             pass
@@ -377,7 +281,6 @@ class CTCRAMReaderSequence2D(object):
                         processed_image.append(img_crop)
                         processed_seg.append(seg_crop)
                         all_fnames.append(filename)
-                        full_seg_seq.append(max(0, full_seg))
                         if self.coord.should_stop():
                             return
                 if self.num_threads == 1:
@@ -389,12 +292,7 @@ class CTCRAMReaderSequence2D(object):
                         if self.coord.should_stop():
                             return
                         time.sleep(1)
-
-                    if self.return_dist:
-                        q.enqueue_many(
-                            [processed_image, processed_seg, full_seg_seq, is_last, all_fnames, processed_dist])
-                    else:
-                        q.enqueue_many([processed_image, processed_seg, full_seg_seq, is_last, all_fnames])
+                    q.enqueue_many([processed_image, processed_seg, is_last, all_fnames])
 
                 except tf.errors.CancelledError:
                     pass
@@ -416,11 +314,8 @@ class CTCRAMReaderSequence2D(object):
             return q_stat
 
         with tf.name_scope('DataHandler'):
-            dtypes = [tf.float32, tf.float32, tf.float32, tf.float32, tf.string]
-            shapes = [self.sub_seq_size, self.sub_seq_size, (), (), ()] ####
-            if self.return_dist:
-                dtypes += [tf.float32]
-                shapes += [self.dist_sub_seq_size]
+            dtypes = [tf.float32, tf.float32,  tf.float32, tf.string]
+            shapes = [self.sub_seq_size, self.sub_seq_size, (), ()] ####
             q_list = []
 
             q_stat_list = []
@@ -435,28 +330,19 @@ class CTCRAMReaderSequence2D(object):
         with tf.name_scope('DataHandler'):
             img_list = []
             seg_list = []
-            dist_list = []
-            full_seg_list = []
             is_last_list = []
             # fname_list = []
             for q in self.q_list:
-                if self.return_dist:
-                    img, seg, full_seg, is_last, fnames, dist = q.dequeue_many(self.unroll_len)
-                    dist_list.append(dist)
-                else:
-                    img, seg, full_seg, is_last, fnames = q.dequeue_many(self.unroll_len)
+                img, seg, is_last, fnames = q.dequeue_many(self.unroll_len)
                 img_list.append(img)
                 seg_list.append(seg)
-                full_seg_list.append(full_seg)
                 is_last_list.append(is_last[-1])
-                # fname_list.append(fnames)
+
 
             image_batch = tf.stack(img_list, axis=0)
             seg_batch = tf.stack(seg_list, axis=0)
-            # fnames_batch = tf.stack(fname_list, axis=0)
-            full_seg_batch = tf.stack(full_seg_list, axis=0)
             is_last_batch = tf.stack(is_last_list, axis=0)
-            dist_batch = tf.stack(dist_list, axis=0) if self.return_dist else None
+
 
             if self.data_format == 'NHWC':
                 image_batch = tf.expand_dims(image_batch, 4)
@@ -467,10 +353,7 @@ class CTCRAMReaderSequence2D(object):
             else:
                 raise ValueError()
 
-        if self.return_dist:
-            return image_batch, seg_batch, full_seg_batch, is_last_batch, dist_batch
-
-        return image_batch, seg_batch, full_seg_batch, is_last_batch
+        return image_batch, seg_batch, is_last_batch
 
     def _create_sequence_queue(self):
         sequence_queue = queue.Queue(maxsize=len(self.sequence_folder_list))

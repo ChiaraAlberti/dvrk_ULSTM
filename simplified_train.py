@@ -85,11 +85,11 @@ def train():
         train_loss = k.metrics.Mean(name='train_loss')
         train_bce_loss = k.metrics.Mean(name='bce_loss')
         train_dice_loss = k.metrics.Mean(name='dice_loss')
-        train_accuracy = k.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+        train_accuracy = k.metrics.Precision(name='train_accuracy')
 #        train_accuracy = METRICS[5]
 
         val_loss = k.metrics.Mean(name='val_loss')
-        val_accuracy = k.metrics.SparseCategoricalAccuracy(name='val_accuracy')
+        val_accuracy = k.metrics.Precision(name='val_accuracy')
 
         # Save Checkpoints
         optimizer = tf.compat.v2.keras.optimizers.Adam(lr=params.learning_rate)
@@ -180,7 +180,7 @@ def train():
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, _, is_last_batch = train_data_provider.get_batch()
+                image_sequence, seg_sequence, is_last_batch = train_data_provider.get_batch()
                 
                 if params.profile:
                         tf.summary.trace_on(graph=True, profiler=True)
@@ -222,8 +222,7 @@ def train():
                 if not int(ckpt.step) % params.validation_interval:
                     train_states = model.get_states()
                     model.set_states(val_states)
-                    (val_image_sequence, val_seg_sequence, _, val_is_last_batch,
-                     ) = val_data_provider.get_batch()
+                    (val_image_sequence, val_seg_sequence, val_is_last_batch) = val_data_provider.get_batch()
                     val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
                                                                                     val_seg_sequence)
                     model.reset_states_per_batch(val_is_last_batch)  # reset states for sequences that ended
