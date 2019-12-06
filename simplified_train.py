@@ -2,12 +2,11 @@ import argparse
 import os
 import pickle
 # noinspection PyPackageRequirements
-import tensorflow as tf
 import Networks_our as Nets
 import Params_our as Params
+import tensorflow as tf
 import DataHandeling_our as DataHandeling
 import sys
-#import losses_our as losses
 from utils import log_print
 import requests
 import matplotlib.pyplot as plt
@@ -16,8 +15,6 @@ import time
 #import cv2
 #import numpy as np
 
-__author__ = 'arbellea@post.bgu.ac.il'
-
 try:
     # noinspection PyPackageRequirements
     import tensorflow.python.keras as k
@@ -25,22 +22,22 @@ except AttributeError:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
     import tensorflow.keras as k
     
-METRICS = [
-      k.metrics.TruePositives(name='tp'),
-      k.metrics.FalsePositives(name='fp'),
-      k.metrics.TrueNegatives(name='tn'),
-      k.metrics.FalseNegatives(name='fn'), 
-      k.metrics.BinaryAccuracy(name='accuracy'),
-      k.metrics.Precision(name='precision'),
-      k.metrics.Recall(name='recall'),
-      k.metrics.AUC(name='auc'),
-]
+#METRICS = [
+#      k.metrics.TruePositives(name='tp'),
+#      k.metrics.FalsePositives(name='fp'),
+#      k.metrics.TrueNegatives(name='tn'),
+#      k.metrics.FalseNegatives(name='fn'), 
+#      k.metrics.BinaryAccuracy(name='accuracy'),
+#      k.metrics.Precision(name='precision'),
+#      k.metrics.Recall(name='recall'),
+#      k.metrics.AUC(name='auc'),
+#]
 
 
-#os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-#print(f'Using Tensorflow version {tf.__version__}')
-#if not tf.__version__.split('.')[0] == '2':
-#    raise ImportError(f'Required tensorflow version 2.x. current version is: {tf.__version__}')
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+print(f'Using Tensorflow version {tf.__version__}')
+if not tf.__version__.split('.')[0] == '2':
+    raise ImportError(f'Required tensorflow version 2.x. current version is: {tf.__version__}')
 
 
 start_time = time.time()
@@ -81,32 +78,23 @@ def train():
         val_data_provider.start_queues(coord)
 
         # Model
-
         model = params.net_model(params.net_kernel_params, params.data_format, False)
 
         # Losses and Metrics
-
-#        ce_loss = losses.WeightedCELoss(params.channel_axis + 1, params.class_weights)
         loss_fn = LossFunction()
-#        seg_measure = losses.seg_measure(params.channel_axis + 1, three_d=False)
         train_loss = k.metrics.Mean(name='train_loss')
         train_bce_loss = k.metrics.Mean(name='bce_loss')
         train_dice_loss = k.metrics.Mean(name='dice_loss')
-#        train_seg_measure = k.metrics.Mean(name='train_seg_measure')
-#        train_accuracy = k.metrics.SparseCategoricalAccuracy(name='train_accuracy')
-        train_accuracy = METRICS[5]
-#        tp = k.metrics.TruePositives(name='tp')
-#        tn = k.metrics.TrueNegatives(name='tn')
+        train_accuracy = k.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+#        train_accuracy = METRICS[5]
 
         val_loss = k.metrics.Mean(name='val_loss')
         val_accuracy = k.metrics.SparseCategoricalAccuracy(name='val_accuracy')
-#        val_seg_measure = k.metrics.Mean(name='val_seg_measure')
 
         # Save Checkpoints
         optimizer = tf.compat.v2.keras.optimizers.Adam(lr=params.learning_rate)
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
         if params.load_checkpoint:
-
             if os.path.isdir(params.load_checkpoint_path):
                 latest_checkpoint = tf.train.latest_checkpoint(params.load_checkpoint_path)
             else:
@@ -133,11 +121,7 @@ def train():
         def train_step(image, label): 
             with tf.GradientTape() as tape:
                 predictions, softmax = model(image, True)
-#                tf.print(softmax)
 #                model.summary()
-#                print('Predictions', predictions.shape)
-#                print('Softmax', softmax.shape)
-#                loss = ce_loss(label, predictions)
                 loss, dice_loss, bce_loss = loss_fn.bce_dice_loss(label, softmax)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -146,32 +130,24 @@ def train():
             train_loss(loss)
             train_dice_loss(dice_loss)
             train_bce_loss(bce_loss)
-#            seg_value = seg_measure(label, predictions)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             train_accuracy(label, softmax)
-#            train_seg_measure(seg_value)
             return softmax, predictions, loss
 
         @tf.function
         def val_step(image, label):
             predictions, softmax = model(image, False)
-#            print('Labels', label)
-#            print('Predictions', predictions.shape)
-#            print('Softmax', softmax[0,0,:,:,0])
-#            t_loss = ce_loss(label, predictions)
             t_loss, t_dice_loss, t_bce_loss = loss_fn.bce_dice_loss(label, softmax)
-
             val_loss(t_loss)
-#            seg_value = seg_measure(label, predictions)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             val_accuracy(label, softmax)
-#            val_seg_measure(seg_value)
             return softmax, predictions, t_loss
 
+        #inizialize directories and dictionaries to use on tensorboard
         train_summary_writer = val_summary_writer = train_scalars_dict = val_scalars_dict = None
         if not params.dry_run:
             train_log_dir = os.path.join(params.experiment_log_dir, 'train')
@@ -179,8 +155,6 @@ def train():
             train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
-#            train_scalars_dict = {'Loss': train_loss, 'SEG': train_seg_measure}
-#            val_scalars_dict = {'Loss': val_loss, 'SEG': val_seg_measure}
             train_scalars_dict = {'Loss': train_loss,'Dice_loss': train_dice_loss, 'Bce loss': train_bce_loss, 'Accuracy': train_accuracy}
             val_scalars_dict = {'Loss': val_loss, 'Accuracy': val_accuracy}
 
@@ -207,33 +181,22 @@ def train():
                         raise AWSError('Quitting Spot Instance Gracefully')
 
                 image_sequence, seg_sequence, _, is_last_batch = train_data_provider.get_batch()
-#                print(tf.reduce_min(seg_sequence))
-#                print(tf.reduce_max(seg_sequence))
                 
                 if params.profile:
-                    with tf.device('/gpu:0'):
                         tf.summary.trace_on(graph=True, profiler=True)
-                train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)
-#                print(tf.reduce_min(train_output_sequence))
-#                print(tf.reduce_max(train_output_sequence))
-
+                
+                train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
                 # q_stats = [qs().numpy() for qs in params.train_data_provider.q_stat_list]
                 # print(q_stats)
                 if params.profile:
                     with train_summary_writer.as_default():
-                        with tf.device('/gpu:0'):
-                            tf.summary.trace_export('train_step', step=int(ckpt.step),
-                                                    profiler_outdir=params.experiment_log_dir)
+                        tf.summary.trace_export('train_step', step=int(ckpt.step),
+                                                profiler_outdir=params.experiment_log_dir)
                 model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
 
+                #calling the function that writes the dictionaries on tensorboard
                 if not int(ckpt.step) % params.write_to_tb_interval:
                     if not params.dry_run:
-
-#                        seg_onehot = tf.one_hot(tf.cast(tf.squeeze(seg_sequence[:, -1], params.channel_axis), tf.int32),
-#                                                depth=2)
-#                        seg_onehot = tf.one_hot(tf.cast(seg_sequence[:, -1], tf.int32), depth=3)
-#                        if params.channel_axis == 1:
-#                            seg_onehot = tf.transpose(seg_onehot, (0, 3, 1, 2))
                         display_image = image_sequence[:, -1]
                         display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
                         display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
@@ -264,17 +227,13 @@ def train():
                     val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
                                                                                     val_seg_sequence)
                     model.reset_states_per_batch(val_is_last_batch)  # reset states for sequences that ended
+                    #calling the function that writes the dictionaries on tensorboard
                     if not params.dry_run:
-                        seg_onehot = tf.one_hot(tf.cast(tf.squeeze(val_seg_sequence[:, -1], params.channel_axis),
-                                                        tf.int32), depth=2)
-#                        seg_onehot = tf.one_hot(tf.cast(val_seg_sequence[:, -1], tf.int32), depth=3)
-                        if params.channel_axis == 1:
-                            seg_onehot = tf.transpose(seg_onehot, (0, 3, 1, 2))
                         display_image = val_image_sequence[:, -1]
                         display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
                         display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
                         val_imgs_dict['Image'] = display_image
-                        val_imgs_dict['GT'] = seg_onehot
+                        val_imgs_dict['GT'] = val_seg_sequence[:, -1]
                         val_imgs_dict['Output'] = val_output_sequence[:, -1]
                         tboard(val_summary_writer, int(ckpt.step), val_scalars_dict, val_imgs_dict)
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))

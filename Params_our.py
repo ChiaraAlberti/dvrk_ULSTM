@@ -3,8 +3,6 @@ import os
 from datetime import datetime
 import Networks_our as Nets
 
-__author__ = 'arbellea@post.bgu.ac.il'
-
 ROOT_DATA_DIR = '/home/stormlab/seg/lstm_dataset'
 ROOT_TEST_DATA_DIR = '/home/stormlab/seg/Test'
 ROOT_SAVE_DIR = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained'
@@ -17,7 +15,7 @@ class ParamsBase(object):
         this_dict = self.__class__.__dict__.keys()
         for key, val in params_dict.items():
             if key not in this_dict:
-                print('Warning!: Parameter:{} not in defualt parameters'.format(key))
+                print('Warning!: Parameter:{} not in default parameters'.format(key))
             setattr(self, key, val)
 
     pass
@@ -26,7 +24,7 @@ class ParamsBase(object):
 class CTCParams(ParamsBase):
     # --------General-------------
     experiment_name = 'MyRun_SIM'
-    gpu_id = -1  # set -1 for CPU or GPU index for GPU.
+    gpu_id = 0  # set -1 for CPU or GPU index for GPU.
 
     #  ------- Data -------
     data_provider_class = DataHandeling.CTCRAMReaderSequence2D
@@ -90,7 +88,6 @@ class CTCParams(ParamsBase):
 
 
     # -------- Training ----------
-#    class_weights = [0.5, 0.5] #[background, foreground, cell contour]
     learning_rate = 1e-5
     num_iterations = 1000
     validation_interval = 10
@@ -121,6 +118,8 @@ class CTCParams(ParamsBase):
                 os.environ['CUDA_VISIBLE_DEVICES'] = str(self.gpu_id)[1:-1]
             else:
                 os.environ['CUDA_VISIBLE_DEVICES'] = str(self.gpu_id)
+        else:
+            os.environ['CUDA_VISIBLE_DEVICES'] = "-1"    
 
         self.train_data_provider = self.data_provider_class(sequence_folder_list=self.root_data_dir,
                                                             image_crop_size=self.crop_size,
@@ -186,11 +185,6 @@ class CTCInferenceParams(ParamsBase):
 
     data_reader = DataHandeling.CTCInferenceReader
     data_format = 'NHWC'  # 'NCHW' or 'NHWC'
-
-    FOV = 0 # Delete objects within boundary of size FOV from each side of the image
-    min_cell_size = 10  # Delete objects with less than min_cell_size pixels
-    max_cell_size = 100  # Delete objects with more than max_cell_size pixels
-    edge_dist = 2  # Regard the nearest edge_dist pixels as foreground
     pre_sequence_frames = 4  # Initialize the sequence with first pre_sequence_frames played in reverse
 
     # ---------Debugging---------

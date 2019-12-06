@@ -47,28 +47,20 @@ class CTCRAMReaderSequence2D(object):
 
     def _read_sequence_to_ram_(self):
         train_set = True
-#        seq = None
         sequence_folder = self.sequence_folder
-#        if isinstance(sequence_folder, tuple):
-#            if len(sequence_folder) == 2:
-#                sequence_folder, seq = sequence_folder
-#            elif len(sequence_folder) == 3:
-#                sequence_folder, seq, train_set = sequence_folder
-
         utils.log_print('Reading Sequence')
         with open(os.path.join(sequence_folder, 'lstm_baseline_ds_bw.pkl'), 'rb') as fobj:
             metadata = pickle.load(fobj)
 
         filename_list = metadata['filelist']
-#        img_size = metadata['shape']
+
         if len(metadata['shape'])== 3:
             img_size = self.reshape_size + (metadata['shape'][-1],)
             all_images = np.zeros((len(filename_list), img_size[0], img_size[1], img_size[2]))
         else:
             img_size = self.reshape_size      
             all_images = np.zeros((len(filename_list), img_size[0], img_size[1]))
-#        if len(img_size) == 3:
-#            img_size = img_size[1:]
+
         all_seg = np.zeros((len(filename_list), img_size[0], img_size[1]))
         all_full_seg = np.zeros((len(filename_list)))
         keep_rate = self.keep_sample
