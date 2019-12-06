@@ -45,33 +45,6 @@ class CTCRAMReaderSequence2D(object):
         self.q_list, self.q_stat_list = self._create_queues()
         np.random.seed(1)
 
-    @classmethod
-    def unit_test(cls):
-        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-        root_dir = '/media/rrtammyfs/labDatabase/CellTrackingChallenge/Training/'
-
-        sequence_folder_list = [(os.path.join(root_dir, 'Fluo-N2DH-SIM+'), '01'),
-                                (os.path.join(root_dir, 'Fluo-N2DH-SIM+'), '02')]
-        image_crop_size = (128, 128)
-        unroll_len = 7
-        deal_with_end = 0
-        batch_size = 4
-        queue_capacity = 250
-        num_threads = 2
-        data_format = 'NCHW'
-        randomize = True
-        return_dist = False
-        keep_sample = 1
-        elastic_augmentation = True
-        data = cls(sequence_folder_list, image_crop_size, unroll_len, deal_with_end, batch_size, queue_capacity,
-                   num_threads, data_format, randomize, return_dist, keep_sample, elastic_augmentation)
-
-        debug = True
-        data.start_queues(debug=debug)
-        for i in range(100):
-            image_batch, seg_batch, full_seg, is_last, fnames = data.get_batch()
-            utils.log_print(image_batch.shape, seg_batch.shape, is_last.shape)
-
     def _read_sequence_to_ram_(self):
         train_set = True
 #        seq = None
@@ -83,22 +56,26 @@ class CTCRAMReaderSequence2D(object):
 #                sequence_folder, seq, train_set = sequence_folder
 
         utils.log_print('Reading Sequence')
-        with open(os.path.join(sequence_folder, 'lstm_baseline_ds.pkl'), 'rb') as fobj:
+        with open(os.path.join(sequence_folder, 'lstm_baseline_ds_bw.pkl'), 'rb') as fobj:
             metadata = pickle.load(fobj)
 
         filename_list = metadata['filelist']
 #        img_size = metadata['shape']
-        img_size = self.reshape_size + (metadata['shape'][-1],)
+        if len(metadata['shape'])== 3:
+            img_size = self.reshape_size + (metadata['shape'][-1],)
+            all_images = np.zeros((len(filename_list), img_size[0], img_size[1], img_size[2]))
+        else:
+            img_size = self.reshape_size      
+            all_images = np.zeros((len(filename_list), img_size[0], img_size[1]))
 #        if len(img_size) == 3:
 #            img_size = img_size[1:]
-        all_images = np.zeros((len(filename_list), img_size[0], img_size[1], img_size[2]))
         all_seg = np.zeros((len(filename_list), img_size[0], img_size[1]))
         all_full_seg = np.zeros((len(filename_list)))
         keep_rate = self.keep_sample
         original_size = 0
         downampled_size = 0
         for t, filename in enumerate(filename_list):
-            img = cv2.imread(os.path.join(sequence_folder, 'train', filename[0]), -1)
+            img = cv2.imread(os.path.join(sequence_folder, 'train_bw', filename[0]), -1)
             if img is None:
                 raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename[0])))
             img = img.astype(np.uint16)
@@ -149,7 +126,7 @@ class CTCRAMReaderSequence2D(object):
         sequence_folder = random.choice(self.sequence_folder_list)
         if isinstance(sequence_folder, tuple):
             sequence_folder = sequence_folder[0]
-        with open(os.path.join(sequence_folder, 'lstm_baseline_ds.pkl'), 'rb') as fobj:
+        with open(os.path.join(sequence_folder, 'lstm_baseline_ds_bw.pkl'), 'rb') as fobj:
             metadata = pickle.load(fobj)
         return metadata
 
@@ -271,7 +248,10 @@ class CTCRAMReaderSequence2D(object):
             while not self.coord.should_stop():
                 seq_data, sequence_folder = self._read_sequence_data()
 #                img_size = seq_data['metadata']['shape']
-                img_size = self.reshape_size + (seq_data['metadata']['shape'][-1],)
+                if len(seq_data['metadata']['shape'])==3:
+                    img_size = self.reshape_size + (seq_data['metadata']['shape'][-1],)
+                else:
+                    img_size = self.reshape_size
                 random_sub_sample = np.random.randint(1, 4) if self.randomize else 0
                 random_reverse = np.random.randint(0, 2) if self.randomize else 0
                 if img_size[0] - self.sub_seq_size[0] > 0:
@@ -445,7 +425,7 @@ class CTCRAMReaderSequence2D(object):
 
         with tf.name_scope('DataHandler'):
             dtypes = [tf.float32, tf.float32, tf.float32, tf.float32, tf.string]
-            shapes = [self.sub_seq_size + (3,), self.sub_seq_size, (), (), ()] ####
+            shapes = [self.sub_seq_size, self.sub_seq_size, (), (), ()] ####
             if self.return_dist:
                 dtypes += [tf.float32]
                 shapes += [self.dist_sub_seq_size]
@@ -487,10 +467,10 @@ class CTCRAMReaderSequence2D(object):
             dist_batch = tf.stack(dist_list, axis=0) if self.return_dist else None
 
             if self.data_format == 'NHWC':
-#                image_batch = tf.expand_dims(image_batch, 4)
+                image_batch = tf.expand_dims(image_batch, 4)
                 seg_batch = tf.expand_dims(seg_batch, 4)
             elif self.data_format == 'NCHW':
-#                image_batch = tf.expand_dims(image_batch, 2)
+                image_batch = tf.expand_dims(image_batch, 2)
                 seg_batch = tf.expand_dims(seg_batch, 2)
             else:
                 raise ValueError()
@@ -562,17 +542,6 @@ class CTCInferenceReader(object):
                 yield img
 
         self.dataset = tf.data.Dataset.from_generator(gen, tf.float32)
-
-    @classmethod
-    def unit_test(cls):
-        data_path = '/Users/aarbelle/Documents/CellTrackingChallenge/Training/DIC-C2DH-HeLa/01'
-        filename_format = 't*.tif'
-        normalize = True
-        data_cls = cls(data_path, filename_format, normalize)
-        for img, fname in data_cls.dataset:
-            print(fname, img.shape, img.numpy().max(), img.numpy().min(), img.numpy().mean(), img.numpy().std())
-
-
 
 if __name__ == "__main__":
     CTCInferenceReader.unit_test()

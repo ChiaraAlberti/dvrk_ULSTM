@@ -12,6 +12,7 @@ from utils import log_print
 import requests
 import matplotlib.pyplot as plt
 from tensorflow.python.keras import losses
+import time 
 #import cv2
 #import numpy as np
 
@@ -23,12 +24,26 @@ try:
 except AttributeError:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
     import tensorflow.keras as k
+    
+METRICS = [
+      k.metrics.TruePositives(name='tp'),
+      k.metrics.FalsePositives(name='fp'),
+      k.metrics.TrueNegatives(name='tn'),
+      k.metrics.FalseNegatives(name='fn'), 
+      k.metrics.BinaryAccuracy(name='accuracy'),
+      k.metrics.Precision(name='precision'),
+      k.metrics.Recall(name='recall'),
+      k.metrics.AUC(name='auc'),
+]
 
-os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-print(f'Using Tensorflow version {tf.__version__}')
-if not tf.__version__.split('.')[0] == '2':
-    raise ImportError(f'Required tensorflow version 2.x. current version is: {tf.__version__}')
 
+#os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+#print(f'Using Tensorflow version {tf.__version__}')
+#if not tf.__version__.split('.')[0] == '2':
+#    raise ImportError(f'Required tensorflow version 2.x. current version is: {tf.__version__}')
+
+
+start_time = time.time()
 
 class AWSError(Exception):
     pass
@@ -78,7 +93,10 @@ def train():
         train_bce_loss = k.metrics.Mean(name='bce_loss')
         train_dice_loss = k.metrics.Mean(name='dice_loss')
 #        train_seg_measure = k.metrics.Mean(name='train_seg_measure')
-        train_accuracy = k.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+#        train_accuracy = k.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+        train_accuracy = METRICS[5]
+#        tp = k.metrics.TruePositives(name='tp')
+#        tn = k.metrics.TrueNegatives(name='tn')
 
         val_loss = k.metrics.Mean(name='val_loss')
         val_accuracy = k.metrics.SparseCategoricalAccuracy(name='val_accuracy')
@@ -134,7 +152,7 @@ def train():
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             train_accuracy(label, softmax)
 #            train_seg_measure(seg_value)
-            return softmax, predictions, loss, dice_loss, bce_loss
+            return softmax, predictions, loss
 
         @tf.function
         def val_step(image, label):
@@ -163,8 +181,8 @@ def train():
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
 #            train_scalars_dict = {'Loss': train_loss, 'SEG': train_seg_measure}
 #            val_scalars_dict = {'Loss': val_loss, 'SEG': val_seg_measure}
-            train_scalars_dict = {'Loss': train_loss,'Dice_loss': train_dice_loss, 'Bce loss': train_bce_loss}
-            val_scalars_dict = {'Loss': val_loss}
+            train_scalars_dict = {'Loss': train_loss,'Dice_loss': train_dice_loss, 'Bce loss': train_bce_loss, 'Accuracy': train_accuracy}
+            val_scalars_dict = {'Loss': val_loss, 'Accuracy': val_accuracy}
 
         def tboard(writer, step, scalar_loss_dict, images_dict):
             with tf.device('/cpu:0'):
@@ -189,12 +207,13 @@ def train():
                         raise AWSError('Quitting Spot Instance Gracefully')
 
                 image_sequence, seg_sequence, _, is_last_batch = train_data_provider.get_batch()
-                print(tf.reduce_min(seg_sequence))
-                print(tf.reduce_max(seg_sequence))
+#                print(tf.reduce_min(seg_sequence))
+#                print(tf.reduce_max(seg_sequence))
                 
                 if params.profile:
-                    tf.summary.trace_on(graph=True, profiler=True)
-                train_output_sequence, train_predictions, train_loss_value, train_dice_loss_value, train_bce_loss_value = train_step(image_sequence, seg_sequence)
+                    with tf.device('/gpu:0'):
+                        tf.summary.trace_on(graph=True, profiler=True)
+                train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)
 #                print(tf.reduce_min(train_output_sequence))
 #                print(tf.reduce_max(train_output_sequence))
 
@@ -202,8 +221,9 @@ def train():
                 # print(q_stats)
                 if params.profile:
                     with train_summary_writer.as_default():
-                        tf.summary.trace_export('train_step', step=int(ckpt.step),
-                                                profiler_outdir=params.experiment_log_dir)
+                        with tf.device('/gpu:0'):
+                            tf.summary.trace_export('train_step', step=int(ckpt.step),
+                                                    profiler_outdir=params.experiment_log_dir)
                 model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
 
                 if not int(ckpt.step) % params.write_to_tb_interval:
@@ -286,6 +306,8 @@ def train():
                     pickle.dump({'name': model.__class__.__name__, 'params': (params.net_kernel_params,)},
                                 fobj, protocol=pickle.HIGHEST_PROTOCOL)
                 log_print('Saved Model to file: {}'.format(model_fname))
+                end_time = time.time()
+                log_print('Program execution time:', end_time - start_time)                
             else:
                 log_print('WARNING: dry_run flag is ON! Not Saving Model')
             log_print('Closing gracefully')

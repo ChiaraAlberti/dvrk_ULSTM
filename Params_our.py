@@ -26,7 +26,7 @@ class ParamsBase(object):
 class CTCParams(ParamsBase):
     # --------General-------------
     experiment_name = 'MyRun_SIM'
-    gpu_id = 0  # set -1 for CPU or GPU index for GPU.
+    gpu_id = -1  # set -1 for CPU or GPU index for GPU.
 
     #  ------- Data -------
     data_provider_class = DataHandeling.CTCRAMReaderSequence2D
@@ -43,48 +43,50 @@ class CTCParams(ParamsBase):
 
     # -------- Network Architecture ----------
     net_model = Nets.ULSTMnet2D
-    net_kernel_params = {
-        'down_conv_kernels': [
-            [(3, 100), (3, 100)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
-            [(3, 200), (3, 200)],
-            [(3, 200), (3, 200)],
-            [(3, 400), (3, 400)],
-        ],
-        'lstm_kernels': [
-            [(5, 100)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many C-LSTMs in each layer
-            [(5, 200)],
-            [(5, 200)],
-            [(5, 400)],
-        ],
-        'up_conv_kernels': [
-            [(3, 200), (3, 200)],   # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
-            [(3, 100), (3, 100)],
-            [(3, 50), (3, 50)],
-            [(3, 25), (3, 25), (1, 1)],
-        ],
-
-    }
     
-#    net_kernel_params = {
-#        'down_conv_kernels': [
-#            [(5, 64), (5, 64)],
-#            [(5, 128), (5, 128)],
-#            [(5, 128), (5, 128)],
-#            [(5, 256), (5, 256)],
-#        ],
-#        'lstm_kernels': [
-#            [(5, 64)],
-#            [(5, 128)],
-#            [(5, 128)],
-#            [(5, 256)],
-#        ],
-#        'up_conv_kernels': [
-#            [(5, 128), (5, 128)],
-#            [(5, 64), (5, 64)],
-#            [(5, 32), (5, 32)],
-#            [(5, 16), (5, 16), (1, 1)],
-#        ],
-#    }
+    if gpu_id ==1:
+        net_kernel_params = {
+            'down_conv_kernels': [
+                [(3, 128), (3, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
+                [(3, 256), (3, 256)],
+                [(3, 256), (3, 256)],
+                [(3, 512), (3, 512)],
+            ],
+            'lstm_kernels': [
+                [(5, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many C-LSTMs in each layer
+                [(5, 256)],
+                [(5, 256)],
+                [(5, 512)],
+            ],
+            'up_conv_kernels': [
+                [(3, 256), (3, 256)],   # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
+                [(3, 128), (3, 128)],
+                [(3, 64), (3, 64)],
+                [(3, 32), (3, 32), (1, 1)],
+            ],
+    
+        }
+    else:   
+        net_kernel_params = {
+            'down_conv_kernels': [
+                [(5, 100), (5, 100)],
+                [(5, 200), (5, 200)],
+                [(5, 200), (5, 200)],
+                [(5, 400), (5, 400)],
+            ],
+            'lstm_kernels': [
+                [(5, 100)],
+                [(5, 200)],
+                [(5, 200)],
+                [(5, 400)],
+            ],
+            'up_conv_kernels': [
+                [(5, 200), (5, 200)],
+                [(5, 100), (5, 100)],
+                [(5, 50), (5, 50)],
+                [(5, 20), (5, 20), (1, 1)],
+            ],
+        }
 
 
     # -------- Training ----------
@@ -114,11 +116,11 @@ class CTCParams(ParamsBase):
 
     def __init__(self, params_dict):
         self._override_params_(params_dict)
-        if isinstance(self.gpu_id, list):
-
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(self.gpu_id)[1:-1]
-        else:
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(self.gpu_id)
+        if self.gpu_id >= 0:
+            if isinstance(self.gpu_id, list):
+                os.environ['CUDA_VISIBLE_DEVICES'] = str(self.gpu_id)[1:-1]
+            else:
+                os.environ['CUDA_VISIBLE_DEVICES'] = str(self.gpu_id)
 
         self.train_data_provider = self.data_provider_class(sequence_folder_list=self.root_data_dir,
                                                             image_crop_size=self.crop_size,

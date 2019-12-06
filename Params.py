@@ -116,7 +116,7 @@ class CTCParams(ParamsBase):
 
     # ---------Debugging-------------
     dry_run = False  # Default False! Used for testing, when True no checkpoints or tensorboard outputs will be saved
-    profile = False
+    profile = True
 
     def __init__(self, params_dict):
         self._override_params_(params_dict)
