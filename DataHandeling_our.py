@@ -10,13 +10,8 @@ import pickle
 import utils
 import time
 import scipy
-import random
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
-
-
-__author__ = 'assafarbelle'
-
 
 class CTCRAMReaderSequence2D(object):
     def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, deal_with_end=0, batch_size=4,
@@ -52,21 +47,22 @@ class CTCRAMReaderSequence2D(object):
 
         if len(metadata['shape'])== 3:
             img_size = self.reshape_size + (metadata['shape'][-1],)
-            all_images = np.zeros((len(filename_list), img_size[0], img_size[1], img_size[2]))
+            all_images = np.zeros((len(filename_list), img_size[0], img_size[1], img_size[2])).astype(np.float32)
         else:
             img_size = self.reshape_size      
-            all_images = np.zeros((len(filename_list), img_size[0], img_size[1]))
+            all_images = np.zeros((len(filename_list), img_size[0], img_size[1])).astype(np.float32)
 
-        all_seg = np.zeros((len(filename_list), img_size[0], img_size[1]))
+        all_seg = np.zeros((len(filename_list), img_size[0], img_size[1])).astype(np.float32)
         for t, filename in enumerate(filename_list):
             img = cv2.imread(os.path.join(sequence_folder, 'train_bw', filename[0]), -1)
             if img is None:
                 raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename[0])))
-            img = img.astype(np.uint16)
-            img = img.astype(np.float32)
-            img = (img - img.mean()) / (img.std())
+#            img = img.astype(np.float32)
+#            img = (img - img.mean()) / (img.std())
+            img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
             img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
             seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
+            seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
             seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
             if seg is None:
                 raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename[1])))
@@ -129,16 +125,16 @@ class CTCRAMReaderSequence2D(object):
 
         return indices
     
-    def shift_img(self, image, width_shift_range, height_shift_range, img_shape):
+    def shift_img(self, image, segment, width_shift_range, height_shift_range, img_shape):
         """This fn will perform the horizontal or vertical shift"""
         if width_shift_range or height_shift_range:
             if width_shift_range:
                 width_shift_range = random.uniform(-width_shift_range * img_shape[1], width_shift_range * img_shape[1])
             if height_shift_range:
                 height_shift_range = random.uniform(-height_shift_range * img_shape[1], height_shift_range * img_shape[1])
-            # Translate both
             img = scipy.ndimage.shift(image, [width_shift_range, height_shift_range])
-            return img
+            seg = scipy.ndimage.shift(segment, [width_shift_range, height_shift_range])
+            return img, seg
 
     @staticmethod
     def _adjust_brightness_(image, delta):
@@ -220,6 +216,7 @@ class CTCRAMReaderSequence2D(object):
                         random_brightness_delta = (np.random.rand() - 0.5) * 0.2 * img_max
                         img_crop = self._adjust_contrast_(img_crop, random_constrast_factor)
                         img_crop = self._adjust_brightness_(img_crop, random_brightness_delta)
+#                        img_crop = cv2.normalize(img_crop, None, 0.0, 1.0, cv2.NORM_MINMAX)
 
                     if self.elastic_augmentation:
                         for i in range(img_crop.shape[2]):
@@ -249,9 +246,6 @@ class CTCRAMReaderSequence2D(object):
                                 raise ValueError('NaN in Seg {} from sequence: {}'.format(file_idx, sequence_folder))
                             if np.any(np.isinf(seg_crop)):
                                 raise ValueError('Inf in Seg {} from sequence: {}'.format(file_idx, sequence_folder))
-                    else:
-#                        seg_crop = self._fix_transformed_segmentation(seg_crop)
-                        seg_crop = seg_crop.astype(np.float32)/255
                     if flip[0]:
                         img_crop = cv2.flip(img_crop, 0)
                         seg_crop = cv2.flip(seg_crop, 0)
@@ -262,8 +256,7 @@ class CTCRAMReaderSequence2D(object):
                         img_crop = np.rot90(img_crop, rotate)
                         seg_crop = np.rot90(seg_crop, rotate)
                     
-                    img_crop = self.shift_img(img_crop, 0.1, 0.1, img_crop.shape)
-                    seg_crop = self.shift_img(seg_crop,0.1, 0.1, seg_crop.shape)
+                    img_crop, seg_crop = self.shift_img(img_crop, seg_crop, 0.1, 0.1, img_crop.shape)
                     is_last_frame = 1. if (t + 1) < len(filename_idx) else 0.
                     if self.num_threads == 1:
                         try:

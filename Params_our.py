@@ -31,8 +31,8 @@ class CTCParams(ParamsBase):
     root_data_dir = ROOT_DATA_DIR
     crop_size = (64, 64)  # (height, width) preferably height=width 
     reshape_size = (64, 64)
-    batch_size = 4
-    unroll_len = 4
+    batch_size = 3
+    unroll_len = 3
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
     train_q_capacity = 200
     val_q_capacity = 200
@@ -42,13 +42,13 @@ class CTCParams(ParamsBase):
     # -------- Network Architecture ----------
     net_model = Nets.ULSTMnet2D
     
-    if gpu_id ==1:
+    if gpu_id ==-1:
         net_kernel_params = {
             'down_conv_kernels': [
-                [(3, 128), (3, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
-                [(3, 256), (3, 256)],
-                [(3, 256), (3, 256)],
-                [(3, 512), (3, 512)],
+                [(5, 128), (5, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
+                [(5, 256), (5, 256)],
+                [(5, 256), (5, 256)],
+                [(5, 512), (5, 512)],
             ],
             'lstm_kernels': [
                 [(5, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many C-LSTMs in each layer
@@ -57,10 +57,10 @@ class CTCParams(ParamsBase):
                 [(5, 512)],
             ],
             'up_conv_kernels': [
-                [(3, 256), (3, 256)],   # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
-                [(3, 128), (3, 128)],
-                [(3, 64), (3, 64)],
-                [(3, 32), (3, 32), (1, 1)],
+                [(5, 256), (5, 256)],   # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
+                [(5, 128), (5, 128)],
+                [(5, 64), (5, 64)],
+                [(5, 32), (5, 32), (1, 1)],
             ],
     
         }
@@ -98,7 +98,7 @@ class CTCParams(ParamsBase):
     load_checkpoint_path = ''  # Used only if load_checkpoint is True
     continue_run = False
     save_checkpoint_dir = ROOT_SAVE_DIR
-    save_checkpoint_iteration = 50
+    save_checkpoint_iteration = 100
     save_checkpoint_every_N_hours = 24
     save_checkpoint_max_to_keep = 5
 

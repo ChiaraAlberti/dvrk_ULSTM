@@ -1,8 +1,6 @@
 import tensorflow as tf
 #import matplotlib.pyplot as plt
 
-__author__ = 'arbellea@post.bgu.ac.il'
-
 try:
     import tensorflow.python.keras as k
 except AttributeError:
@@ -43,11 +41,13 @@ class DownBlock2D(k.Model):
         self.BN = []
         self.LReLU = []
         self.total_stride = 1
+        self.recurrent_dropout = 0.2
+        self.droput_rate = 0.2
 
         for kxy_lstm, kout_lstm in lstm_kernels:
             self.ConvLSTM.append(k.layers.ConvLSTM2D(filters=kout_lstm, kernel_size=kxy_lstm, strides=1,
                                                      padding='same', data_format=data_format_keras,
-                                                     return_sequences=True, stateful=True))
+                                                     return_sequences=True, stateful=True, dropout=self.recurrent_dropout, recurrent_dropout=self.recurrent_dropout))
 
         for l_ind, (kxy, kout) in enumerate(conv_kernels):
             _stride = stride if l_ind == 0 else 1
@@ -61,7 +61,8 @@ class DownBlock2D(k.Model):
         convlstm = inputs
         for conv_lstm_layer in self.ConvLSTM:
             convlstm = conv_lstm_layer(convlstm)
-
+        
+#        convlstm = k.layers.Dropout(self.dropout_rate)(convlstm)
         orig_shape = convlstm.shape
 
         conv_input = tf.reshape(convlstm, [orig_shape[0] * orig_shape[1], orig_shape[2], orig_shape[3], orig_shape[4]])
@@ -195,17 +196,17 @@ class ULSTMnet2D(k.Model):
         for down_layer in self.DownLayers:
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
-            out_skip = k.layers.Dropout(dropout_rate_down)(out_skip)
-            dropout_rate_down = dropout_rate_down *1.5
+#            out_skip = k.layers.Dropout(dropout_rate_down)(out_skip)
+#            dropout_rate_down = dropout_rate_down *1.2
         up_input = out_skip
 
         skip_inputs.reverse()
         assert len(skip_inputs) == len(self.UpLayers)
         for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
             up_input = up_layer((up_input, skip_input), training=training, mask=mask)
-            up_input = k.layers.Dropout(dropout_rate_down)(up_input)
-            dropout_rate_down = dropout_rate_down/1.5
-        
+#            up_input = k.layers.Dropout(dropout_rate_down)(up_input)
+#            dropout_rate_down = dropout_rate_down/1.2
+#        up_input = k.layers.Dropout(self.dropout_rate)(up_input)
         logits_output_shape = up_input.shape
         logits_output = tf.reshape(up_input, [input_shape[0], input_shape[1], logits_output_shape[1],
                                               logits_output_shape[2], logits_output_shape[3]])
