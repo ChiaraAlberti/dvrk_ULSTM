@@ -25,6 +25,7 @@ class CTCParams(ParamsBase):
     # --------General-------------
     experiment_name = 'MyRun_SIM'
     gpu_id = 0  # set -1 for CPU or GPU index for GPU.
+    trial = 1
 
     #  ------- Data -------
     data_provider_class = DataHandeling.CTCRAMReaderSequence2D
@@ -64,7 +65,31 @@ class CTCParams(ParamsBase):
             ],
     
         }
-    else:   
+    elif trial==1:   
+        net_kernel_params = {
+            'down_conv_kernels': [
+                [(5, 50), (5, 50)],
+                [(5, 100), (5, 100)],
+                [(5, 100), (5, 100)],
+                [(5, 200), (5, 200)],
+                [(5, 400), (5, 400)],
+            ],
+            'lstm_kernels': [
+                [(5, 50)],
+                [(5, 100)],
+                [(5, 100)],
+                [(5, 200)],
+                [(5, 400)],                
+            ],
+            'up_conv_kernels': [
+                [(5, 100), (5, 100)],
+                [(5, 100), (5, 100)],
+                [(5, 50), (5, 50)],
+                [(5, 50), (5, 50)],
+                [(5, 20), (5, 20), (1, 1)],
+            ],
+        }
+    else:
         net_kernel_params = {
             'down_conv_kernels': [
                 [(5, 100), (5, 100)],
@@ -84,11 +109,11 @@ class CTCParams(ParamsBase):
                 [(5, 50), (5, 50)],
                 [(5, 20), (5, 20), (1, 1)],
             ],
-        }
+        }  
 
 
     # -------- Training ----------
-    learning_rate = 1e-5
+    learning_rate = 0.0001
     num_iterations = 10000
     validation_interval = 10
     print_to_console_interval = 10

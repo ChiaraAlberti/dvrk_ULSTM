@@ -51,8 +51,9 @@ class CTCRAMReaderSequence2D(object):
         else:
             img_size = self.reshape_size      
             all_images = np.zeros((len(filename_list), img_size[0], img_size[1])).astype(np.float32)
-
         all_seg = np.zeros((len(filename_list), img_size[0], img_size[1])).astype(np.float32)
+        num_ones = 0
+        num_zeros = 0
         for t, filename in enumerate(filename_list):
             img = cv2.imread(os.path.join(sequence_folder, 'train_bw', filename[0]), -1)
             if img is None:
@@ -64,11 +65,14 @@ class CTCRAMReaderSequence2D(object):
             seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
             seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
             seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
+            num_ones = num_ones + np.count_nonzero(seg)
+            num_zeros = num_zeros + (self.reshape_size[0]*self.reshape_size[1] - np.count_nonzero(seg))
             if seg is None:
                 raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename[1])))
             all_images[t] = img
             all_seg[t] = seg
-
+        print(num_ones)
+        print(num_zeros)
         self.sequence_data[sequence_folder] = {'images': np.array(all_images), 'segs': np.array(all_seg), 'metadata': metadata}
 
     def _read_sequence_data(self):

@@ -7,6 +7,7 @@ except AttributeError:
     import tensorflow.keras as k
 import numpy as np
 from typing import List
+from tensorflow.python.keras import regularizers
 
 DEFAULT_NET_DOWN_PARAMS = {
     'down_conv_kernels': [
@@ -43,16 +44,17 @@ class DownBlock2D(k.Model):
         self.total_stride = 1
         self.recurrent_dropout = 0.2
         self.droput_rate = 0.2
+        self.bias = tf.keras.initializers.Constant(-0.198729)
 
         for kxy_lstm, kout_lstm in lstm_kernels:
             self.ConvLSTM.append(k.layers.ConvLSTM2D(filters=kout_lstm, kernel_size=kxy_lstm, strides=1,
-                                                     padding='same', data_format=data_format_keras,
-                                                     return_sequences=True, stateful=True, dropout=self.recurrent_dropout, recurrent_dropout=self.recurrent_dropout))
+                                                     padding='same', data_format=data_format_keras, kernel_initializer='random_uniform',
+                                                     return_sequences=True, stateful=True, dropout=self.recurrent_dropout))
 
         for l_ind, (kxy, kout) in enumerate(conv_kernels):
             _stride = stride if l_ind == 0 else 1
             self.total_stride *= _stride
-            self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=_stride, use_bias=True,
+            self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=_stride, use_bias=True, kernel_initializer='random_uniform',
                                              data_format=data_format_keras, padding='same'))
             self.BN.append(k.layers.BatchNormalization(axis=channel_axis))
             self.LReLU.append(k.layers.LeakyReLU())
@@ -109,13 +111,14 @@ class UpBlock2D(k.Model):
         self.BN = []
         self.LReLU = []
         self.return_logits = return_logits
+        self.bias = tf.keras.initializers.Constant(-0.198729)
 
         for kxy, kout in kernels:
-            self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=1, use_bias=True,
+            self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=1, use_bias=True, kernel_initializer='random_uniform',
                                              data_format=self.data_format_keras, padding='same'))
-
             self.BN.append(k.layers.BatchNormalization(axis=self.channel_axis))
             self.LReLU.append(k.layers.LeakyReLU())
+            
 
     def call(self, inputs, training=None, mask=None):
         input_sequence, skip = inputs
@@ -192,7 +195,7 @@ class ULSTMnet2D(k.Model):
         skip_inputs = []
         out_down = inputs
         out_skip = tf.reshape(inputs, [input_shape[0] * input_shape[1], input_shape[2], input_shape[3], input_shape[4]])
-        dropout_rate_down = self.dropout_rate
+#        dropout_rate_down = self.dropout_rate
         for down_layer in self.DownLayers:
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)

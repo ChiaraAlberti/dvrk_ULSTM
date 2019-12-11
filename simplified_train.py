@@ -21,17 +21,17 @@ try:
 except AttributeError:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
     import tensorflow.keras as k
-    
-#METRICS = [
-#      k.metrics.TruePositives(name='tp'),
-#      k.metrics.FalsePositives(name='fp'),
-#      k.metrics.TrueNegatives(name='tn'),
-#      k.metrics.FalseNegatives(name='fn'), 
-#      k.metrics.BinaryAccuracy(name='accuracy'),
-#      k.metrics.Precision(name='precision'),
-#      k.metrics.Recall(name='recall'),
-#      k.metrics.AUC(name='auc'),
-#]
+
+METRICS = [
+      k.metrics.TruePositives(name='tp'),
+      k.metrics.FalsePositives(name='fp'),
+      k.metrics.TrueNegatives(name='tn'),
+      k.metrics.FalseNegatives(name='fn'), 
+      k.metrics.BinaryAccuracy(name='accuracy'),
+      k.metrics.Precision(name='precision'),
+      k.metrics.Recall(name='recall'),
+      k.metrics.AUC(name='auc'),
+]
 
 
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
@@ -79,20 +79,23 @@ def train():
 
         # Model
         model = params.net_model(params.net_kernel_params, params.data_format, False)
-
         # Losses and Metrics
         loss_fn = LossFunction()
         train_loss = k.metrics.Mean(name='train_loss')
-        train_bce_loss = k.metrics.Mean(name='bce_loss')
-        train_dice_loss = k.metrics.Mean(name='dice_loss')
-        train_accuracy = k.metrics.Precision(name='train_accuracy')
+        train_metrics = METRICS
 #        train_accuracy = METRICS[5]
 
         val_loss = k.metrics.Mean(name='val_loss')
-        val_accuracy = k.metrics.Precision(name='val_accuracy')
+        val_metrics = METRICS
 
         # Save Checkpoints
-        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=params.learning_rate)
+        init_learning_rate = 0.1
+        lr_schedule = tf.compat.v2.keras.optimizers.schedules.ExponentialDecay(
+                init_learning_rate, 
+                decay_steps=100000,
+                decay_rate=0.96, 
+                staircase=True)
+        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lr_schedule)
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
         if params.load_checkpoint:
             if os.path.isdir(params.load_checkpoint_path):
@@ -125,15 +128,14 @@ def train():
                 loss, dice_loss, bce_loss = loss_fn.bce_dice_loss(label, softmax)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-
             ckpt.step.assign_add(1)
             train_loss(loss)
-            train_dice_loss(dice_loss)
-            train_bce_loss(bce_loss)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
-            train_accuracy(label, softmax)
+            for i, metric in enumerate(train_metrics):
+                metric(label, softmax)
+                train_metrics[i] = metric
             return softmax, predictions, loss
 
         @tf.function
@@ -144,7 +146,9 @@ def train():
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
-            val_accuracy(label, softmax)
+            for i, metric in enumerate(val_metrics):
+                metric(label, softmax)
+                val_metrics[i] = metric
             return softmax, predictions, t_loss
 
         #inizialize directories and dictionaries to use on tensorboard
@@ -155,20 +159,23 @@ def train():
             train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
-            train_scalars_dict = {'Loss': train_loss,'Dice_loss': train_dice_loss, 'Bce loss': train_bce_loss, 'Accuracy': train_accuracy}
-            val_scalars_dict = {'Loss': val_loss, 'Accuracy': val_accuracy}
+            train_scalars_dict = {'Loss': train_loss,'Model evaluation': train_metrics[4]}
+            val_scalars_dict = {'Loss': val_loss, 'Accuracy': val_metrics[0]}
 
         def tboard(writer, step, scalar_loss_dict, images_dict):
             with tf.device('/cpu:0'):
                 with writer.as_default():
                     for scalar_loss_name, scalar_loss in scalar_loss_dict.items():
-                        tf.summary.scalar(scalar_loss_name, scalar_loss.result(), step=step)
+#                        if (scalar_loss_name != 'Loss'):
+#                            for i in range(0, len(scalar_loss)):
+#                                print(i)
+                        tf.summary.scalar(scalar_loss_name, scalar_loss[i].result(), step=step)
                     for image_name, image in images_dict.items():
                         if params.channel_axis == 1:
                             image = tf.transpose(image, (0, 2, 3, 1))
                         tf.summary.image(image_name, image, max_outputs=1, step=step)
 
-        template = '{}: Step {}, Loss: {}, Accuracy: {}'
+        template = '{}: Step {}, Loss: {}, Accuracy: {}, Precision: {}, Recall: {}'
         try:
             # if True:
             val_states = model.get_states()
@@ -217,7 +224,8 @@ def train():
                 if not int(ckpt.step) % params.print_to_console_interval:
                     log_print(template.format('Training', int(ckpt.step),
                                               train_loss.result(),
-                                              train_accuracy.result() * 100))
+                                              train_metrics[4].result() * 100, train_metrics[5].result() * 100, 
+                                              train_metrics[6].result() * 100))
 
                 if not int(ckpt.step) % params.validation_interval:
                     train_states = model.get_states()
@@ -241,7 +249,8 @@ def train():
 
                     log_print(template.format('Validation', int(ckpt.step),
                                               val_loss.result(),
-                                              val_accuracy.result() * 100))
+                                              val_metrics[4].result() * 100, val_metrics[5].result() * 100, 
+                                              val_metrics[6].result() * 100))
                     val_states = model.get_states()
                     model.set_states(train_states)
 
