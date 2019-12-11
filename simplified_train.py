@@ -89,13 +89,13 @@ def train():
         val_metrics = METRICS
 
         # Save Checkpoints
-        init_learning_rate = 0.1
-        lr_schedule = tf.compat.v2.keras.optimizers.schedules.ExponentialDecay(
-                init_learning_rate, 
+
+        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+                initial_learning_rate = params.learning_rate, 
                 decay_steps=100000,
                 decay_rate=0.96, 
                 staircase=True)
-        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lr_schedule)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
         if params.load_checkpoint:
             if os.path.isdir(params.load_checkpoint_path):
@@ -156,20 +156,35 @@ def train():
         if not params.dry_run:
             train_log_dir = os.path.join(params.experiment_log_dir, 'train')
             val_log_dir = os.path.join(params.experiment_log_dir, 'val')
+            
             train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
-            train_scalars_dict = {'Loss': train_loss,'Model evaluation': train_metrics[4]}
-            val_scalars_dict = {'Loss': val_loss, 'Accuracy': val_metrics[0]}
+            train_scalars_dict = {'Loss': train_loss,'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
+            val_scalars_dict = {'Loss': val_loss, 'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
 
-        def tboard(writer, step, scalar_loss_dict, images_dict):
+        def tboard(writer, log_dir, step, scalar_loss_dict, images_dict):
             with tf.device('/cpu:0'):
                 with writer.as_default():
                     for scalar_loss_name, scalar_loss in scalar_loss_dict.items():
-#                        if (scalar_loss_name != 'Loss'):
-#                            for i in range(0, len(scalar_loss)):
-#                                print(i)
-                        tf.summary.scalar(scalar_loss_name, scalar_loss[i].result(), step=step)
+                        if (scalar_loss_name == 'LUT values'):
+                            with tf.summary.create_file_writer(os.path.join(log_dir, 'TruePositive')).as_default():
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result(), step=step)
+                            with tf.summary.create_file_writer(os.path.join(log_dir, 'FalsePositive')).as_default():
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result(), step=step)
+                            with tf.summary.create_file_writer(os.path.join(log_dir, 'TrueNegative')).as_default():
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result(), step=step)
+                            with tf.summary.create_file_writer(os.path.join(log_dir, 'FalseNegative')).as_default():
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[3].result(), step=step)
+                        elif (scalar_loss_name == 'Model evaluation'):
+                            with tf.summary.create_file_writer(os.path.join(log_dir, 'Accuracy')).as_default():
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result(), step=step)
+                            with tf.summary.create_file_writer(os.path.join(log_dir, 'Precision')).as_default():
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result(), step=step)
+                            with tf.summary.create_file_writer(os.path.join(log_dir, 'Recall')).as_default():
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result(), step=step)                   
+                        else:
+                            tf.summary.scalar(scalar_loss_name, scalar_loss.result(), step=step)
                     for image_name, image in images_dict.items():
                         if params.channel_axis == 1:
                             image = tf.transpose(image, (0, 2, 3, 1))
@@ -210,7 +225,7 @@ def train():
                         train_imgs_dict['Image'] = display_image
                         train_imgs_dict['GT'] = seg_sequence[:, -1]
                         train_imgs_dict['Output'] = train_output_sequence[:, -1]
-                        tboard(train_summary_writer, int(ckpt.step), train_scalars_dict, train_imgs_dict)
+                        tboard(train_summary_writer, train_log_dir, int(ckpt.step), train_scalars_dict, train_imgs_dict)
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
                         log_print("WARNING: dry_run flag is ON! Not saving checkpoints or tensorboard data")
@@ -242,7 +257,7 @@ def train():
                         val_imgs_dict['Image'] = display_image
                         val_imgs_dict['GT'] = val_seg_sequence[:, -1]
                         val_imgs_dict['Output'] = val_output_sequence[:, -1]
-                        tboard(val_summary_writer, int(ckpt.step), val_scalars_dict, val_imgs_dict)
+                        tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict)
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
                         log_print("WARNING: dry_run flag is ON! Not saving checkpoints or tensorboard data")
