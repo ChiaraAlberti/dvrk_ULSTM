@@ -10,10 +10,10 @@ import sys
 from utils import log_print
 import requests
 import matplotlib.pyplot as plt
+import cv2
 from tensorflow.python.keras import losses
 import time 
-#import cv2
-#import numpy as np
+import numpy as np
 
 try:
     # noinspection PyPackageRequirements
@@ -23,7 +23,7 @@ except AttributeError:
     import tensorflow.keras as k
 
 METRICS = [
-      k.metrics.TruePositives(name='tp'),
+      k.metrics.TruePositives(thresholds=0.8, name='tp'),
       k.metrics.FalsePositives(name='fp'),
       k.metrics.TrueNegatives(name='tn'),
       k.metrics.FalseNegatives(name='fn'), 
@@ -189,7 +189,16 @@ def train():
                         if params.channel_axis == 1:
                             image = tf.transpose(image, (0, 2, 3, 1))
                         tf.summary.image(image_name, image, max_outputs=1, step=step)
-
+                        
+        def post_processing(images):
+            images_shape = images.shape
+            im_reshaped = np.reshape(images, (images_shape[0]*images_shape[1], images_shape[2], images_shape[3]))
+            bw_predictions = np.zeros((im_reshaped.shape[0], im_reshaped.shape[1], im_reshaped.shape[2])).astype(np.float32)
+            for i in range(0, images.shape[0]):
+                ret, bw_predictions[i] = cv2.threshold(im_reshaped[i],0.8, 1 ,cv2.THRESH_BINARY)
+            bw_predictions = np.reshape(bw_predictions, images_shape)
+            return bw_predictions
+            
         template = '{}: Step {}, Loss: {}, Accuracy: {}, Precision: {}, Recall: {}'
         try:
             # if True:
@@ -208,6 +217,7 @@ def train():
                         tf.summary.trace_on(graph=True, profiler=True)
                 
                 train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
+                bw_predictions = post_processing(train_output_sequence)
                 # q_stats = [qs().numpy() for qs in params.train_data_provider.q_stat_list]
                 # print(q_stats)
                 if params.profile:
@@ -225,6 +235,7 @@ def train():
                         train_imgs_dict['Image'] = display_image
                         train_imgs_dict['GT'] = seg_sequence[:, -1]
                         train_imgs_dict['Output'] = train_output_sequence[:, -1]
+                        train_imgs_dict['Output_bw'] = bw_predictions[:, -1]
                         tboard(train_summary_writer, train_log_dir, int(ckpt.step), train_scalars_dict, train_imgs_dict)
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -248,6 +259,7 @@ def train():
                     (val_image_sequence, val_seg_sequence, val_is_last_batch) = val_data_provider.get_batch()
                     val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
                                                                                     val_seg_sequence)
+                    bw_predictions = post_processing(val_output_sequence)
                     model.reset_states_per_batch(val_is_last_batch)  # reset states for sequences that ended
                     #calling the function that writes the dictionaries on tensorboard
                     if not params.dry_run:
@@ -257,6 +269,7 @@ def train():
                         val_imgs_dict['Image'] = display_image
                         val_imgs_dict['GT'] = val_seg_sequence[:, -1]
                         val_imgs_dict['Output'] = val_output_sequence[:, -1]
+                        train_imgs_dict['Output_bw'] = bw_predictions[:, -1]
                         tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict)
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:

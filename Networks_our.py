@@ -168,6 +168,7 @@ class ULSTMnet2D(k.Model):
 
     def call(self, inputs, training=None, mask=None):
         input_shape = inputs.shape
+        inputs = k.layers.Dropout(self.dropout_rate)(inputs)
         min_pad_value = self.total_stride * int(self.pad_image) if self.pad_image else 0
 
         if self.channel_axis == 1:
@@ -202,7 +203,7 @@ class ULSTMnet2D(k.Model):
 #            out_skip = k.layers.Dropout(dropout_rate_down)(out_skip)
 #            dropout_rate_down = dropout_rate_down *1.2
         up_input = out_skip
-
+        up_input = tf.keras.layers.ActivityRegularization(0.1, 0.1)(up_input)
         skip_inputs.reverse()
         assert len(skip_inputs) == len(self.UpLayers)
         for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
