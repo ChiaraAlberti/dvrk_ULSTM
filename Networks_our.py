@@ -5,31 +5,7 @@ try:
     import tensorflow.python.keras as k
 except AttributeError:
     import tensorflow.keras as k
-import numpy as np
 from typing import List
-from tensorflow.python.keras import regularizers
-
-DEFAULT_NET_DOWN_PARAMS = {
-    'down_conv_kernels': [
-        [(5, 128), (5, 128)],
-        [(5, 256), (5, 256)],
-        [(5, 256), (5, 256)],
-        [(5, 512), (5, 512)],
-    ],
-    'lstm_kernels': [
-        [(5, 128)],
-        [(5, 256)],
-        [(5, 256)],
-        [(5, 512)],
-    ],
-    'up_conv_kernels': [
-        [(5, 256), (5, 256)],
-        [(5, 128), (5, 128)],
-        [(5, 64), (5, 64)],
-        [(5, 32), (5, 32), (1, 1)],
-    ],
-
-}
 
 class DownBlock2D(k.Model):
 
@@ -64,7 +40,6 @@ class DownBlock2D(k.Model):
         for conv_lstm_layer in self.ConvLSTM:
             convlstm = conv_lstm_layer(convlstm)
         
-#        convlstm = k.layers.Dropout(self.dropout_rate)(convlstm)
         orig_shape = convlstm.shape
 
         conv_input = tf.reshape(convlstm, [orig_shape[0] * orig_shape[1], orig_shape[2], orig_shape[3], orig_shape[4]])
@@ -136,7 +111,7 @@ class UpBlock2D(k.Model):
 
 
 class ULSTMnet2D(k.Model):
-    def __init__(self, net_params=DEFAULT_NET_DOWN_PARAMS, data_format='NHWC', pad_image=True):
+    def __init__(self, net_params=None, data_format='NHWC', pad_image=True):
         super(ULSTMnet2D, self).__init__()
         self.data_format_keras = 'channels_first' if data_format[1] == 'C' else 'channels_last'
         self.channel_axis = 1 if data_format[1] == 'C' else -1
@@ -196,21 +171,21 @@ class ULSTMnet2D(k.Model):
         skip_inputs = []
         out_down = inputs
         out_skip = tf.reshape(inputs, [input_shape[0] * input_shape[1], input_shape[2], input_shape[3], input_shape[4]])
-#        dropout_rate_down = self.dropout_rate
+        #dropout_rate_down = self.dropout_rate
         for down_layer in self.DownLayers:
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
-#            out_skip = k.layers.Dropout(dropout_rate_down)(out_skip)
-#            dropout_rate_down = dropout_rate_down *1.2
+            #out_skip = k.layers.Dropout(dropout_rate_down)(out_skip)
+            #dropout_rate_down = dropout_rate_down *1.2
         up_input = out_skip
         up_input = tf.keras.layers.ActivityRegularization(0.1, 0.1)(up_input)
         skip_inputs.reverse()
         assert len(skip_inputs) == len(self.UpLayers)
         for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
             up_input = up_layer((up_input, skip_input), training=training, mask=mask)
-#            up_input = k.layers.Dropout(dropout_rate_down)(up_input)
-#            dropout_rate_down = dropout_rate_down/1.2
-#        up_input = k.layers.Dropout(self.dropout_rate)(up_input)
+            #up_input = k.layers.Dropout(dropout_rate_down)(up_input)
+            #dropout_rate_down = dropout_rate_down/1.2
+        #up_input = k.layers.Dropout(self.dropout_rate)(up_input)
         logits_output_shape = up_input.shape
         logits_output = tf.reshape(up_input, [input_shape[0], input_shape[1], logits_output_shape[1],
                                               logits_output_shape[2], logits_output_shape[3]])

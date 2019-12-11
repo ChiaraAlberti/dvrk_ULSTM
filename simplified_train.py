@@ -83,8 +83,6 @@ def train():
         loss_fn = LossFunction()
         train_loss = k.metrics.Mean(name='train_loss')
         train_metrics = METRICS
-#        train_accuracy = METRICS[5]
-
         val_loss = k.metrics.Mean(name='val_loss')
         val_metrics = METRICS
 
@@ -158,8 +156,8 @@ def train():
             val_log_dir = os.path.join(params.experiment_log_dir, 'val')
             
             train_summary_writer = tf.summary.create_file_writer(train_log_dir)
-
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
+            
             train_scalars_dict = {'Loss': train_loss,'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
             val_scalars_dict = {'Loss': val_loss, 'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
 
@@ -218,8 +216,7 @@ def train():
                 
                 train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
                 bw_predictions = post_processing(train_output_sequence)
-                # q_stats = [qs().numpy() for qs in params.train_data_provider.q_stat_list]
-                # print(q_stats)
+
                 if params.profile:
                     with train_summary_writer.as_default():
                         tf.summary.trace_export('train_step', step=int(ckpt.step),
