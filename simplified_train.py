@@ -22,14 +22,13 @@ except AttributeError:
     import tensorflow.keras as k
 
 METRICS = [
-      k.metrics.TruePositives(thresholds=0.8, name='tp'),
+      k.metrics.TruePositives(name='tp'),
       k.metrics.FalsePositives(name='fp'),
       k.metrics.TrueNegatives(name='tn'),
       k.metrics.FalseNegatives(name='fn'), 
       k.metrics.BinaryAccuracy(name='accuracy'),
       k.metrics.Precision(name='precision'),
       k.metrics.Recall(name='recall'),
-      k.metrics.AUC(name='auc'),
 ]
 
 
@@ -85,12 +84,13 @@ def train():
         val_loss = k.metrics.Mean(name='val_loss')
         val_metrics = METRICS
 
+
         # Save Checkpoints
 
         lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
                 initial_learning_rate = params.learning_rate, 
                 decay_steps=100000,
-                decay_rate=0.96, 
+                decay_rate=params.decay_rate, 
                 staircase=True)
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
@@ -166,13 +166,13 @@ def train():
                     for scalar_loss_name, scalar_loss in scalar_loss_dict.items():
                         if (scalar_loss_name == 'LUT values'):
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'TruePositive')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result(), step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result().numpy()/ckpt.step, step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'FalsePositive')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result(), step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result().numpy()/ckpt.step, step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'TrueNegative')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result(), step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result().numpy()/ckpt.step, step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'FalseNegative')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[3].result(), step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[3].result().numpy()/ckpt.step, step=step)
                         elif (scalar_loss_name == 'Model evaluation'):
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'Accuracy')).as_default():
                                tf.summary.scalar(scalar_loss_name, scalar_loss[0].result(), step=step)
@@ -215,6 +215,7 @@ def train():
                 
                 train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
                 bw_predictions = post_processing(train_output_sequence)
+                
 
                 if params.profile:
                     with train_summary_writer.as_default():
@@ -244,6 +245,7 @@ def train():
                     else:
                         log_print("WARNING: dry_run flag is ON! Mot saving checkpoints or tensorboard data")
                 if not int(ckpt.step) % params.print_to_console_interval:
+#                    print(sum([train_metrics[0].result(), train_metrics[1].result(), train_metrics[2].result(), train_metrics[3].result()]))
                     log_print(template.format('Training', int(ckpt.step),
                                               train_loss.result(),
                                               train_metrics[4].result() * 100, train_metrics[5].result() * 100, 
@@ -265,7 +267,7 @@ def train():
                         val_imgs_dict['Image'] = display_image
                         val_imgs_dict['GT'] = val_seg_sequence[:, -1]
                         val_imgs_dict['Output'] = val_output_sequence[:, -1]
-                        train_imgs_dict['Output_bw'] = bw_predictions[:, -1]
+                        val_imgs_dict['Output_bw'] = bw_predictions[:, -1]
                         tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict)
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -395,6 +397,8 @@ if __name__ == '__main__':
                             help="Continue run in existing directory")
     arg_parser.add_argument('--learning_rate', dest='learning_rate', type=float,
                             help="Learning rate")
+        arg_parser.add_argument('--decay_rate', dest='decay_rate', type=float,
+                            help="Decay rate")
     arg_parser.add_argument('--class_weights', dest='class_weights', type=float, nargs=3,
                             help="class weights for background, foreground and edge classes")
     arg_parser.add_argument('--save_checkpoint_dir', dest='save_checkpoint_dir', type=str,

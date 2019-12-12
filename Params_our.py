@@ -32,8 +32,8 @@ class CTCParams(ParamsBase):
     root_data_dir = ROOT_DATA_DIR
     crop_size = (64, 64)  # (height, width) preferably height=width 
     reshape_size = (64, 64)
-    batch_size = 5
-    unroll_len = 5
+    batch_size = 4
+    unroll_len = 4
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
     train_q_capacity = 200
     val_q_capacity = 200
@@ -114,6 +114,7 @@ class CTCParams(ParamsBase):
 
     # -------- Training ----------
     learning_rate = 0.0001
+    decay_rate=0.96
     num_iterations = 1000
     validation_interval = 10
     print_to_console_interval = 10
