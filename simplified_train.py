@@ -215,7 +215,6 @@ def train():
                 
                 train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
                 bw_predictions = post_processing(train_output_sequence)
-                
 
                 if params.profile:
                     with train_summary_writer.as_default():
@@ -245,7 +244,6 @@ def train():
                     else:
                         log_print("WARNING: dry_run flag is ON! Mot saving checkpoints or tensorboard data")
                 if not int(ckpt.step) % params.print_to_console_interval:
-#                    print(sum([train_metrics[0].result(), train_metrics[1].result(), train_metrics[2].result(), train_metrics[3].result()]))
                     log_print(template.format('Training', int(ckpt.step),
                                               train_loss.result(),
                                               train_metrics[4].result() * 100, train_metrics[5].result() * 100, 
@@ -397,7 +395,7 @@ if __name__ == '__main__':
                             help="Continue run in existing directory")
     arg_parser.add_argument('--learning_rate', dest='learning_rate', type=float,
                             help="Learning rate")
-        arg_parser.add_argument('--decay_rate', dest='decay_rate', type=float,
+    arg_parser.add_argument('--decay_rate', dest='decay_rate', type=float,
                             help="Decay rate")
     arg_parser.add_argument('--class_weights', dest='class_weights', type=float, nargs=3,
                             help="class weights for background, foreground and edge classes")

@@ -3,7 +3,7 @@ Created on Thu Dec 12 15:45:07 2019
 
 @author: stormlab
 """
-def Net_type(self, dropout, reg, kernel_init):
+def Net_type(dropout, reg, kernel_init):
     net_kernel_params = {
             'cpu_net': {            
                 'down_conv_kernels': [
@@ -105,3 +105,4 @@ def Net_type(self, dropout, reg, kernel_init):
                 ],
             }
     }
+    return net_kernel_params        

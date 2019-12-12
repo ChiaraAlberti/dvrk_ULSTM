@@ -115,7 +115,7 @@ class CTCParams(ParamsBase):
     # -------- Training ----------
     learning_rate = 0.0001
     decay_rate=0.96
-    num_iterations = 1000
+    num_iterations = 50000
     validation_interval = 10
     print_to_console_interval = 10
 

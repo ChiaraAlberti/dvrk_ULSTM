@@ -1,1 +1,4 @@
-runfile('/home/stormlab/seg/LSTM-UNet-master/simplified_train.py', wdir='/home/stormlab/seg/LSTM-UNet-master')
+from netdict import Net_type
+
+
+print(Net_type(0,0,0)['cpu_net'])
