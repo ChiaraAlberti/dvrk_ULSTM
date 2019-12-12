@@ -9,7 +9,6 @@ import DataHandeling_our as DataHandeling
 import sys
 from utils import log_print
 import requests
-import matplotlib.pyplot as plt
 import cv2
 from tensorflow.python.keras import losses
 import time 
