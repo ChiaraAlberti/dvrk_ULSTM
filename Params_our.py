@@ -41,81 +41,81 @@ class CTCParams(ParamsBase):
     num_train_threads = 8
 
     # -------- Network Architecture ----------
-    net_model = Nets.ULSTMnet2D
-    
-    if gpu_id ==-1:
-        net_kernel_params = {
-            'down_conv_kernels': [
-                [(5, 128), (5, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
-                [(5, 256), (5, 256)],
-                [(5, 256), (5, 256)],
-                [(5, 512), (5, 512)],
-            ],
-            'lstm_kernels': [
-                [(5, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many C-LSTMs in each layer
-                [(5, 256)],
-                [(5, 256)],
-                [(5, 512)],
-            ],
-            'up_conv_kernels': [
-                [(5, 256), (5, 256)],   # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
-                [(5, 128), (5, 128)],
-                [(5, 64), (5, 64)],
-                [(5, 32), (5, 32), (1, 1)],
-            ],
-    
-        }
-    elif trial==1:   
-        net_kernel_params = {
-            'down_conv_kernels': [
-                [(5, 50), (5, 50)],
-                [(5, 100), (5, 100)],
-                [(5, 100), (5, 100)],
-                [(5, 200), (5, 200)],
-                [(5, 400), (5, 400)],
-            ],
-            'lstm_kernels': [
-                [(5, 50)],
-                [(5, 100)],
-                [(5, 100)],
-                [(5, 200)],
-                [(5, 400)],                
-            ],
-            'up_conv_kernels': [
-                [(5, 100), (5, 100)],
-                [(5, 100), (5, 100)],
-                [(5, 50), (5, 50)],
-                [(5, 50), (5, 50)],
-                [(5, 20), (5, 20), (1, 1)],
-            ],
-        }
-    else:
-        net_kernel_params = {
-            'down_conv_kernels': [
-                [(5, 100), (5, 100)],
-                [(5, 200), (5, 200)],
-                [(5, 200), (5, 200)],
-                [(5, 400), (5, 400)],
-            ],
-            'lstm_kernels': [
-                [(5, 100)],
-                [(5, 200)],
-                [(5, 200)],
-                [(5, 400)],
-            ],
-            'up_conv_kernels': [
-                [(5, 200), (5, 200)],
-                [(5, 100), (5, 100)],
-                [(5, 50), (5, 50)],
-                [(5, 20), (5, 20), (1, 1)],
-            ],
-        }  
+#    
+#    if gpu_id ==-1:
+#        net_kernel_params = {
+#            'down_conv_kernels': [
+#                [(5, 128), (5, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
+#                [(5, 256), (5, 256)],
+#                [(5, 256), (5, 256)],
+#                [(5, 512), (5, 512)],
+#            ],
+#            'lstm_kernels': [
+#                [(5, 128)],  # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many C-LSTMs in each layer
+#                [(5, 256)],
+#                [(5, 256)],
+#                [(5, 512)],
+#            ],
+#            'up_conv_kernels': [
+#                [(5, 256), (5, 256)],   # [(kernel_size, num_filters), (kernel_size, num_filters), ...] As many convolustoins in each layer
+#                [(5, 128), (5, 128)],
+#                [(5, 64), (5, 64)],
+#                [(5, 32), (5, 32), (1, 1)],
+#            ],
+#    
+#        }
+#    elif trial==1:   
+#        net_kernel_params = {
+#            'down_conv_kernels': [
+#                [(5, 50), (5, 50)],
+#                [(5, 100), (5, 100)],
+#                [(5, 100), (5, 100)],
+#                [(5, 200), (5, 200)],
+#                [(5, 400), (5, 400)],
+#            ],
+#            'lstm_kernels': [
+#                [(5, 50)],
+#                [(5, 100)],
+#                [(5, 100)],
+#                [(5, 200)],
+#                [(5, 400)],                
+#            ],
+#            'up_conv_kernels': [
+#                [(5, 100), (5, 100)],
+#                [(5, 100), (5, 100)],
+#                [(5, 50), (5, 50)],
+#                [(5, 50), (5, 50)],
+#                [(5, 20), (5, 20), (1, 1)],
+#            ],
+#        }
+#    else:
+#        net_kernel_params = {
+#            'down_conv_kernels': [
+#                [(5, 100), (5, 100)],
+#                [(5, 200), (5, 200)],
+#                [(5, 200), (5, 200)],
+#                [(5, 400), (5, 400)],
+#            ],
+#            'lstm_kernels': [
+#                [(5, 100)],
+#                [(5, 200)],
+#                [(5, 200)],
+#                [(5, 400)],
+#            ],
+#            'up_conv_kernels': [
+#                [(5, 200), (5, 200)],
+#                [(5, 100), (5, 100)],
+#                [(5, 50), (5, 50)],
+#                [(5, 20), (5, 20), (1, 1)],
+#            ],
+#        }  
 
 
     # -------- Training ----------
-    learning_rate = 0.0001
-    decay_rate=0.96
-    num_iterations = 50000
+#    learning_rate = 0.0001
+#    decay_rate=0.96
+#    drop_input = True
+    num_iterations = 20
     validation_interval = 10
     print_to_console_interval = 10
 

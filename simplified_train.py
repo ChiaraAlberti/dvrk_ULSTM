@@ -13,6 +13,8 @@ import cv2
 from tensorflow.python.keras import losses
 import time 
 import numpy as np
+import pandas as pd
+from netdict import Net_type
 
 try:
     # noinspection PyPackageRequirements
@@ -64,7 +66,7 @@ class LossFunction:
         return loss, dice_loss, bce_loss
 
 
-def train():
+def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_type):
    
     device = '/gpu:0' if params.gpu_id >= 0 else '/cpu:0'
     with tf.device(device):
@@ -76,7 +78,8 @@ def train():
         val_data_provider.start_queues(coord)
 
         # Model
-        model = params.net_model(params.net_kernel_params, params.data_format, False)
+        net_kernel_params = Net_type(dropout, (l1, l2), kern_init)[NN_type]
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input)
         # Losses and Metrics
         loss_fn = LossFunction()
         train_loss = k.metrics.Mean(name='train_loss')
@@ -88,9 +91,9 @@ def train():
         # Save Checkpoints
 
         lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate = params.learning_rate, 
+                initial_learning_rate = lr, 
                 decay_steps=100000,
-                decay_rate=params.decay_rate, 
+                decay_rate=lr_decay, 
                 staircase=True)
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
@@ -294,7 +297,7 @@ def train():
                 model_fname = os.path.join(params.experiment_save_dir, 'model.ckpt'.format(int(ckpt.step)))
                 model.save_weights(model_fname, save_format='tf')
                 with open(os.path.join(params.experiment_save_dir, 'model_params.pickle'), 'wb') as fobj:
-                    pickle.dump({'name': model.__class__.__name__, 'params': (params.net_kernel_params,)},
+                    pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
                                 fobj, protocol=pickle.HIGHEST_PROTOCOL)
                 log_print('Saved Model to file: {}'.format(model_fname))
                 end_time = time.time()
@@ -425,4 +428,18 @@ if __name__ == '__main__':
     #     train()
     # finally:
     #     log_print('Done')
-    train()
+    
+
+    df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list.csv', skip_blank_lines=True).dropna()
+    dict_param = df.to_dict(orient='list')
+    
+    for _, dropout in enumerate(dict_param['Dropout']):
+        for _, drop_input in enumerate(dict_param['Drop_input']):
+            for _, lr in enumerate(dict_param['Learning rate']):
+                for _, crop_size in enumerate(dict_param['Crop']):
+                    for _, kern_init in enumerate(dict_param['Kernel init']):
+                        for _, l1 in enumerate(dict_param['L1']):
+                            for _, l2 in enumerate(dict_param['L2']):
+                                for _, lr_decay in enumerate(dict_param['Learning rate decay']):
+                                    for _, NN_type in enumerate(dict_param['Type of NN']):
+                                        train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_type)
