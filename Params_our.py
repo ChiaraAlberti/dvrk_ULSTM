@@ -115,7 +115,7 @@ class CTCParams(ParamsBase):
 #    learning_rate = 0.0001
 #    decay_rate=0.96
 #    drop_input = True
-    num_iterations = 20
+    num_iterations = 1
     validation_interval = 10
     print_to_console_interval = 10
 
@@ -190,8 +190,8 @@ class CTCParams(ParamsBase):
         if not self.dry_run:
             os.makedirs(self.experiment_log_dir, exist_ok=True)
             os.makedirs(self.experiment_save_dir, exist_ok=True)
-            os.makedirs(os.path.join(self.experiment_log_dir, 'train'), exist_ok=True)
-            os.makedirs(os.path.join(self.experiment_log_dir, 'val'), exist_ok=True)
+#            os.makedirs(os.path.join(self.experiment_log_dir, 'train'), exist_ok=True)
+#            os.makedirs(os.path.join(self.experiment_log_dir, 'val'), exist_ok=True)
         self.channel_axis = 1 if self.data_format == 'NCHW' else 3
         if self.profile:
             if 'CUPTI' not in os.environ['LD_LIBRARY_PATH']:

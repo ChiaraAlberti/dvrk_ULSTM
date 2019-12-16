@@ -26,7 +26,7 @@ class DownBlock2D(k.Model):
         for kxy_lstm, kout_lstm, dropout, reg, kernel_init in lstm_kernels:
             self.ConvLSTM.append(k.layers.ConvLSTM2D(filters=kout_lstm, kernel_size=kxy_lstm, strides=1,
                                                      padding='same', data_format=data_format_keras, kernel_initializer=kernel_init,
-                                                     return_sequences=True, stateful=True, dropout=dropout, 
+                                                     return_sequences=True, stateful=True, recurrent_dropout=dropout, 
                                                      kernel_regularizer=regularizers.l1_l2(l1=reg[0], l2=reg[1])))
 
         for l_ind, (kxy, kout, dropout, reg, kernel_init) in enumerate(conv_kernels):
@@ -143,6 +143,7 @@ class ULSTMnet2D(k.Model):
             self.UpLayers.append(UpBlock2D(conv_filters, up_factor, data_format,
                                            return_logits=layer_ind + 1 == len(net_params['up_conv_kernels'])))
             self.last_depth = conv_filters[-1][1]
+            self.last_layer = conv_filters[-1]
 
     def call(self, inputs, training=None, mask=None):
         input_shape = inputs.shape
@@ -178,10 +179,13 @@ class ULSTMnet2D(k.Model):
         for down_layer in self.DownLayers:
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
+        out_skip = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(out_skip)
         up_input = out_skip
         skip_inputs.reverse()
         assert len(skip_inputs) == len(self.UpLayers)
         for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
+            if up_layer == self.last_layer:
+                up_layer = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(up_layer)
             up_input = up_layer((up_input, skip_input), training=training, mask=mask)
         logits_output_shape = up_input.shape
         logits_output = tf.reshape(up_input, [input_shape[0], input_shape[1], logits_output_shape[1],
