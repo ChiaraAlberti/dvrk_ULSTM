@@ -92,7 +92,8 @@ def train():
             with tf.GradientTape() as tape:
                 predictions, softmax = model(image, True)
 #                print('Labels', label.shape)
-#                print('Predictions', predictions.shape)
+                print('Predictions', predictions.shape)
+                print('Softmax', softmax.shape)
 #                tf.print(predictions)
 #                print(tf.math.reduce_max(softmax))
 #                print(tf.math.reduce_min(softmax))

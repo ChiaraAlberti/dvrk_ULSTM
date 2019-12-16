@@ -15,7 +15,8 @@ import time
 import numpy as np
 import pandas as pd
 from netdict import Net_type
-import csv
+import csv 
+import matplotlib.pyplot as plt
 
 try:
     # noinspection PyPackageRequirements
@@ -125,6 +126,7 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
         def train_step(image, label): 
             with tf.GradientTape() as tape:
                 predictions, softmax = model(image, True)
+#                print(softmax.shape)
 #                model.summary()
                 loss, dice_loss, bce_loss = loss_fn.bce_dice_loss(label, softmax)
             gradients = tape.gradient(loss, model.trainable_variables)
@@ -199,7 +201,24 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 ret, bw_predictions[i] = cv2.threshold(im_reshaped[i],0.8, 1 ,cv2.THRESH_BINARY)
             bw_predictions = np.reshape(bw_predictions, images_shape)
             return bw_predictions
-            
+        
+        def show_dataset_labels(x_train, y_train):
+            num_train = x_train.shape[0]*x_train.shape[1]
+            x_train = np.reshape(x_train, (x_train.shape[0]*x_train.shape[1], x_train.shape[2], x_train.shape[3]))
+            y_train = np.reshape(y_train, (y_train.shape[0]*y_train.shape[1], y_train.shape[2], y_train.shape[3]))
+            plt.figure(figsize=(15, 15))
+            for i in range(0, num_train):
+                plt.subplot(num_train/2, 2, i + 1)
+                plt.imshow(x_train[i, :,:], cmap = 'gray')
+                plt.title("Original Image")
+            plt.show()
+            for j in range(0, num_train):
+                plt.subplot(num_train/2, 2, j + 1)
+                plt.imshow(y_train[j, :,:], cmap = 'gray')
+                plt.title("Masked Image")
+            plt.suptitle("Examples of Images and their Masks")
+            plt.show()
+       
         template = '{}: Step {}, Loss: {}, Accuracy: {}, Precision: {}, Recall: {}'
         try:
             # if True:
@@ -213,6 +232,7 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                         raise AWSError('Quitting Spot Instance Gracefully')
 
                 image_sequence, seg_sequence, is_last_batch = train_data_provider.get_batch()
+                show_dataset_labels(image_sequence, seg_sequence)
                 
                 if params.profile:
                         tf.summary.trace_on(graph=True, profiler=True)
