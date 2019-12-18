@@ -36,8 +36,8 @@ class CTCParams(ParamsBase):
     #  ------- Data -------
     data_provider_class = DataHandeling.CTCRAMReaderSequence2D
     root_data_dir = ROOT_DATA_DIR
-    train_sequence_list = [('Fluo-N2DH-SIM+', '01'), ('Fluo-N2DH-SIM+', '02')]  # [('Dataset Name', 'SequenceNumber'), ('Dataset Name', 'SequenceNumber'), ]
-    val_sequence_list = [('Fluo-N2DH-SIM+', '01'), ('Fluo-N2DH-SIM+', '02')]
+    train_sequence_list = [('DIC-C2DH-HeLa', '01'), ('DIC-C2DH-HeLa', '02')]  # [('Dataset Name', 'SequenceNumber'), ('Dataset Name', 'SequenceNumber'), ]
+    val_sequence_list = [('DIC-C2DH-HeLa', '01'), ('DIC-C2DH-HeLa', '02')]
     crop_size = (64, 64)  # (height, width) preferably height=width 
     batch_size = 4
     unroll_len = 4
@@ -116,7 +116,7 @@ class CTCParams(ParamsBase):
 
     # ---------Debugging-------------
     dry_run = False  # Default False! Used for testing, when True no checkpoints or tensorboard outputs will be saved
-    profile = True
+    profile = False
 
     def __init__(self, params_dict):
         self._override_params_(params_dict)

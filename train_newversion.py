@@ -5,7 +5,7 @@ import pickle
 import Networks_our as Nets
 import Params_our as Params
 import tensorflow as tf
-import DataHandeling_our as DataHandeling
+import DataHandeling_modified as DataHandeling
 import sys
 from utils import log_print
 import requests
@@ -63,6 +63,9 @@ class LossFunction:
         return loss
 
     def bce_dice_loss(self, y_true, y_pred):
+        valid_im = tf.cast(tf.greater(y_true, -1), tf.float32)
+        y_true = y_true * valid_im
+        y_pred = y_pred * valid_im
         bce_loss = losses.binary_crossentropy(y_true, y_pred)
         dice_loss = self.dice_loss(y_true, y_pred)
         loss = bce_loss + dice_loss
@@ -76,9 +79,6 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
         # Data input
         train_data_provider = params.train_data_provider
         val_data_provider = params.val_data_provider
-        coord = tf.train.Coordinator()
-        train_data_provider.start_queues(coord)
-        val_data_provider.start_queues(coord)
 
         # Model
         net_kernel_params = Net_type(dropout, (l1, l2), kern_init)[NN_type]
@@ -129,7 +129,7 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 predictions, softmax = model(image, True)
 #                print(softmax.shape)
 #                model.summary()
-                loss, dice_loss, bce_loss = loss_fn.bce_dice_loss(label, softmax)
+                loss, dice_loss, bce_loss = loss_fn.bce_dice_loss(label[:,0], softmax[:,0])
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             ckpt.step.assign_add(1)
@@ -138,26 +138,26 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(train_metrics):
-                metric(label, softmax)
+                metric(label[:,0], softmax[:,0])
                 train_metrics[i] = metric
             return softmax, predictions, loss
 
         @tf.function
         def val_step(image, label):
             predictions, softmax = model(image, False)
-            t_loss, t_dice_loss, t_bce_loss = loss_fn.bce_dice_loss(label, softmax)
+            t_loss, t_dice_loss, t_bce_loss = loss_fn.bce_dice_loss(label[:,0], softmax[:,0])
             val_loss(t_loss)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(val_metrics):
-                metric(label, softmax)
+                metric(label[:,0], softmax[:,0])
                 val_metrics[i] = metric
             return softmax, predictions, t_loss
 
         #inizialize directories and dictionaries to use on tensorboard
         train_summary_writer = val_summary_writer = train_scalars_dict = val_scalars_dict = None
-        if not params.dry_run:     
+        if not params.dry_run:         
             train_log_dir = os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'train')
             val_log_dir = os.path.join(params.experiment_log_dir,'NN_'+ str(params_value[0]), 'val')
             train_summary_writer = tf.summary.create_file_writer(train_log_dir)
@@ -220,6 +220,7 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
             plt.show()
        
         template = '{}: Step {}, Loss: {}, Accuracy: {}, Precision: {}, Recall: {}'
+        log_print('Start of training')
         try:
             # if True:
             val_states = model.get_states()
@@ -231,9 +232,8 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, is_last_batch = train_data_provider.get_batch()
+                image_sequence, seg_sequence, is_last_batch = train_data_provider._read_batch()
 #                show_dataset_labels(image_sequence, seg_sequence)
-                
                 if params.profile:
                         tf.summary.trace_on(graph=True, profiler=True)
                 
@@ -249,13 +249,13 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 #calling the function that writes the dictionaries on tensorboard
                 if not int(ckpt.step) % params.write_to_tb_interval:
                     if not params.dry_run:
-                        display_image = image_sequence[:, -1]
+                        display_image = image_sequence[:, 0]
                         display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
                         display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
                         train_imgs_dict['Image'] = display_image
-                        train_imgs_dict['GT'] = seg_sequence[:, -1]
-                        train_imgs_dict['Output'] = train_output_sequence[:, -1]
-                        train_imgs_dict['Output_bw'] = bw_predictions[:, -1]
+                        train_imgs_dict['GT'] = seg_sequence[:, 0]
+                        train_imgs_dict['Output'] = train_output_sequence[:, 0]
+                        train_imgs_dict['Output_bw'] = bw_predictions[:, 0]
                         tboard(train_summary_writer, train_log_dir, int(ckpt.step), train_scalars_dict, train_imgs_dict)
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -276,20 +276,20 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 if not int(ckpt.step) % params.validation_interval:
                     train_states = model.get_states()
                     model.set_states(val_states)
-                    (val_image_sequence, val_seg_sequence, val_is_last_batch) = val_data_provider.get_batch()
+                    (val_image_sequence, val_seg_sequence, is_last_batch) = val_data_provider._read_batch()
                     val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
                                                                                     val_seg_sequence)
                     bw_predictions = post_processing(val_output_sequence)
-                    model.reset_states_per_batch(val_is_last_batch)  # reset states for sequences that ended
+                    model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
                     #calling the function that writes the dictionaries on tensorboard
                     if not params.dry_run:
-                        display_image = val_image_sequence[:, -1]
+                        display_image = val_image_sequence[:, 0]
                         display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
                         display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
                         val_imgs_dict['Image'] = display_image
-                        val_imgs_dict['GT'] = val_seg_sequence[:, -1]
-                        val_imgs_dict['Output'] = val_output_sequence[:, -1]
-                        val_imgs_dict['Output_bw'] = bw_predictions[:, -1]
+                        val_imgs_dict['GT'] = val_seg_sequence[:, 0]
+                        val_imgs_dict['Output'] = val_output_sequence[:, 0]
+                        val_imgs_dict['Output_bw'] = bw_predictions[:, 0]
                         tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict)
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -341,8 +341,6 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
             else:
                 log_print('WARNING: dry_run flag is ON! Not Saving Model')
             log_print('Closing gracefully')
-            coord.request_stop()
-            coord.join()
             log_print('Done')
 
 

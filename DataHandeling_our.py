@@ -12,6 +12,7 @@ import time
 import scipy
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
+from PIL import Image
 
 class CTCRAMReaderSequence2D(object):
     def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, deal_with_end=0, batch_size=4,
@@ -62,13 +63,14 @@ class CTCRAMReaderSequence2D(object):
 #            img = (img - img.mean()) / (img.std())
             img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
             img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
-            seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
-            seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+            if filename[1] == 'None':
+                seg = np.ones(img.shape[:2]) * (-1)
+            else:
+                seg = cv2.imread(os.path.join(sequence_folder, 'labels', filename[1]), -1)
+                seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
             seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
             num_ones = num_ones + np.count_nonzero(seg)
             num_zeros = num_zeros + (self.reshape_size[0]*self.reshape_size[1] - np.count_nonzero(seg))
-            if seg is None:
-                raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename[1])))
             all_images[t] = img
             all_seg[t] = seg
         print(num_ones)
