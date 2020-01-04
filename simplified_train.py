@@ -233,19 +233,17 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
 
                 image_sequence, seg_sequence, is_last_batch = train_data_provider.get_batch()
 #                show_dataset_labels(image_sequence, seg_sequence)
-                
                 if params.profile:
                         tf.summary.trace_on(graph=True, profiler=True)
                 
                 train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
                 bw_predictions = post_processing(train_output_sequence)
-
                 if params.profile:
                     with train_summary_writer.as_default():
                         tf.summary.trace_export('train_step', step=int(ckpt.step),
                                                 profiler_outdir=params.experiment_log_dir)
                 model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
-
+                
                 #calling the function that writes the dictionaries on tensorboard
                 if not int(ckpt.step) % params.write_to_tb_interval:
                     if not params.dry_run:

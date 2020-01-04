@@ -47,9 +47,9 @@ class CTCRAMReaderSequence2D(object):
         out_img = (image - img_mean) * factor + img_mean
         return out_img
     
-    def _read_batch(self):
+    def read_batch(self):
         sequence_folder = self.sequence_folder
-        with open(os.path.join(sequence_folder, 'full_csv.pkl'), 'rb') as fobj:
+        with open(os.path.join(sequence_folder, 'lstm_baseline_ds_bw.pkl'), 'rb') as fobj:
             metadata = pickle.load(fobj)
     
         filename_list = metadata['filelist']
@@ -69,9 +69,9 @@ class CTCRAMReaderSequence2D(object):
         valid_future_masks = [i for i in valid_masks if i not in self.used_masks]
         if len(valid_future_masks)<self.batch_size:
             self.used_masks = []
-            is_last_batch = np.array([1,1,1,1]).astype(np.float32)
+            is_last_batch = np.array([0,0,0,0]).astype(np.float32)
         else:
-            is_last_batch = np.array([0,0,0,0]).astype(np.float32)               
+            is_last_batch = np.array([1,1,1,1]).astype(np.float32)               
         
         for i in range (0, self.batch_size):
             if len(metadata['shape'])==3:
@@ -99,7 +99,7 @@ class CTCRAMReaderSequence2D(object):
                     height_shift_range = random.uniform(-self.height_shift_range * img_size[1], self.height_shift_range * img_size[1])
     
             for j in range (0, self.unroll_len):
-                img = cv2.imread(os.path.join(sequence_folder, 'train', filename_list[batch_index[i]-j][0]), -1)
+                img = cv2.imread(os.path.join(sequence_folder, 'train_bw', filename_list[batch_index[i]-j][0]), -1)
                 if img is None:
                     raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename_list[batch_index[i]-j][0])))
                 img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
@@ -137,11 +137,12 @@ class CTCRAMReaderSequence2D(object):
                 img_crop = scipy.ndimage.shift(img_crop, [width_shift_range, height_shift_range])
                 seg_crop = scipy.ndimage.shift(seg_crop, [width_shift_range, height_shift_range])
                 
-                all_images[i, j] = img_crop
-                all_seg[i, j] = seg_crop
+                all_images[i, self.unroll_len - j -1] = img_crop
+                all_seg[i, self.unroll_len - j -1] = seg_crop
                 
-        image_batch = tf.stack(all_images, axis=0)
-        seg_batch = tf.stack(all_seg, axis=0)
+        image_batch = tf.convert_to_tensor(all_images)
+        seg_batch = tf.convert_to_tensor(all_seg)
+        is_last_batch = tf.convert_to_tensor(is_last_batch)
         
         if self.data_format == 'NHWC':
             image_batch = tf.expand_dims(image_batch, 4)

@@ -2,7 +2,7 @@ import DataHandeling_modified as DataHandeling
 import os
 from datetime import datetime
 
-ROOT_DATA_DIR = '/home/stormlab/seg/lstm_dataset_complete'
+ROOT_DATA_DIR = '/home/stormlab/seg/lstm_dataset'
 ROOT_TEST_DATA_DIR = '/home/stormlab/seg/Test'
 ROOT_SAVE_DIR = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained'
 
@@ -41,7 +41,7 @@ class CTCParams(ParamsBase):
 
 
     # -------- Training ----------
-    num_iterations = 50000
+    num_iterations = 10000
     validation_interval = 10
     print_to_console_interval = 10
 
