@@ -309,8 +309,8 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 if ckpt.step == params.num_iterations:
                     final_train_loss = train_loss.result()
                     final_val_loss = val_loss.result()
-                    final_train_prec = train_metrics[6].result() * 100
-                    final_val_prec = train_metrics[6].result() * 100
+                    final_train_prec = train_metrics[5].result() * 100
+                    final_val_prec = train_metrics[5].result() * 100
 
         except (KeyboardInterrupt, ValueError, AWSError) as err:
             if not params.dry_run:

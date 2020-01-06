@@ -1,8 +1,8 @@
-import DataHandeling_modified as DataHandeling
+import DataHandeling_trial as DataHandeling
 import os
 from datetime import datetime
 
-ROOT_DATA_DIR = '/home/stormlab/seg/lstm_dataset'
+ROOT_DATA_DIR = '/home/stormlab/seg/lstm_dataset_complete'
 ROOT_TEST_DATA_DIR = '/home/stormlab/seg/Test'
 ROOT_SAVE_DIR = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained'
 
