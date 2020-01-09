@@ -1,4 +1,4 @@
-import DataHandeling_trial as DataHandeling
+import DataHandeling_modified as DataHandeling
 import os
 from datetime import datetime
 
@@ -40,7 +40,7 @@ class CTCParams(ParamsBase):
 
 
     # -------- Training ----------
-    num_iterations = 50000
+    num_iterations = 20000
     validation_interval = 10
     print_to_console_interval = 10
 

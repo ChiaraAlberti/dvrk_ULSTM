@@ -49,18 +49,21 @@ class CTCRAMReaderSequence2D(object):
     
     def read_batch(self):
         sequence_folder = self.sequence_folder
-        with open(os.path.join(sequence_folder, 'lstm_baseline_ds_bw.pkl'), 'rb') as fobj:
+        with open(os.path.join(sequence_folder, 'full_csv_prova.pkl'), 'rb') as fobj:
             metadata = pickle.load(fobj)
     
         filename_list = metadata['filelist']
         
         if len(metadata['shape'])== 3:
             img_size = self.reshape_size + (metadata['shape'][-1],)
-            all_images = np.zeros((self.batch_size, self.unroll_len, img_size[0], img_size[1], img_size[2])).astype(np.float32)
+#            all_images = np.zeros((self.batch_size, self.unroll_len, img_size[0], img_size[1], img_size[2])).astype(np.float32)
+            all_images = []
         else:
             img_size = self.reshape_size      
-            all_images = np.zeros((self.batch_size, self.unroll_len, img_size[0], img_size[1])).astype(np.float32)
-        all_seg = np.zeros((self.batch_size, self.unroll_len, img_size[0], img_size[1])).astype(np.float32)
+#            all_images = np.zeros((self.batch_size, self.unroll_len, img_size[0], img_size[1])).astype(np.float32)
+            all_images = []
+#        all_seg = np.zeros((self.batch_size, self.unroll_len, img_size[0], img_size[1])).astype(np.float32)
+        all_seg = []
     
         valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
         valid_masks = [i for i in valid_masks if i not in self.used_masks]
@@ -69,11 +72,15 @@ class CTCRAMReaderSequence2D(object):
         valid_future_masks = [i for i in valid_masks if i not in self.used_masks]
         if len(valid_future_masks)<self.batch_size:
             self.used_masks = []
-            is_last_batch = np.array([0,0,0,0]).astype(np.float32)
+            is_last_batch = np.array([0, 0, 0, 0]).astype(np.float32)
+            is_last_batch = is_last_batch.tolist()
         else:
-            is_last_batch = np.array([1,1,1,1]).astype(np.float32)               
+            is_last_batch = np.array([1, 1, 1, 1]).astype(np.float32)
+            is_last_batch = is_last_batch.tolist()
         
         for i in range (0, self.batch_size):
+            image_seq = []
+            seg_seq = []
             if len(metadata['shape'])==3:
                     img_size = self.reshape_size + (metadata['shape'][-1],)
             else:
@@ -99,16 +106,15 @@ class CTCRAMReaderSequence2D(object):
                     height_shift_range = random.uniform(-self.height_shift_range * img_size[1], self.height_shift_range * img_size[1])
     
             for j in range (0, self.unroll_len):
-                img = cv2.imread(os.path.join(sequence_folder, 'train_bw', filename_list[batch_index[i]-j][0]), -1)
+                img = cv2.imread(os.path.join(sequence_folder, 'train', filename_list[batch_index[i]- self.unroll_len + j + 1][0]), -1)
                 if img is None:
-                    raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename_list[batch_index[i]-j][0])))
+                    raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename_list[batch_index[i]- self.unroll_len + j +1][0])))
                 img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
                 img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
-                if filename_list[batch_index[i]-j][1] == 'None':
-                    seg = np.ones(img.shape[:2]) * (-1)
+                if filename_list[batch_index[i]- self.unroll_len + j + 1][1] == 'None':
+                    seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
                 else:
-                    seg = Image.open(os.path.join(sequence_folder, 'labels', filename_list[batch_index[i]-j][1]))
-                    seg = np.array(seg)
+                    seg =cv2.imread(os.path.join(sequence_folder, 'labels', filename_list[batch_index[i] - self.unroll_len + j + 1][1]), -1)
                     seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
                 seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
                 
@@ -137,12 +143,15 @@ class CTCRAMReaderSequence2D(object):
                 img_crop = scipy.ndimage.shift(img_crop, [width_shift_range, height_shift_range])
                 seg_crop = scipy.ndimage.shift(seg_crop, [width_shift_range, height_shift_range])
                 
-                all_images[i, self.unroll_len - j -1] = img_crop
-                all_seg[i, self.unroll_len - j -1] = seg_crop
+                image_seq.append(img_crop)
+                seg_seq.append(seg_crop)
                 
-        image_batch = tf.convert_to_tensor(all_images)
-        seg_batch = tf.convert_to_tensor(all_seg)
-        is_last_batch = tf.convert_to_tensor(is_last_batch)
+            all_images.append(image_seq)
+            all_seg.append(seg_seq)
+                
+        image_batch = tf.stack(all_images)
+        seg_batch = tf.stack(all_seg)
+        is_last_batch = tf.stack(is_last_batch)
         
         if self.data_format == 'NHWC':
             image_batch = tf.expand_dims(image_batch, 4)

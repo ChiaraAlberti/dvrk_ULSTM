@@ -63,14 +63,18 @@ class LossFunction:
         return loss
 
     def bce_dice_loss(self, y_true, y_pred):
-        bce_loss = losses.binary_crossentropy(y_true, y_pred)
-        dice_loss = self.dice_loss(y_true, y_pred)
-        loss = bce_loss + dice_loss
-        valid  = np.zeros((loss.shape)).astype(np.float32)
+        valid  = np.zeros((y_true.shape)).astype(np.float32)
         valid[:, -1] = 1
 #        y_true = y_true * valid
 #        y_pred = y_pred * valid
-        loss = loss * valid
+        y_true = y_true[:, -1]
+        y_pred = y_pred[:, -1]
+        bce_loss = losses.binary_crossentropy(y_true, y_pred)
+        dice_loss = self.dice_loss(y_true, y_pred)
+        loss = bce_loss + dice_loss
+#        y_true = y_true * valid
+#        y_pred = y_pred * valid
+#        loss = loss * valid
         loss = tf.reduce_sum(loss) / (tf.reduce_sum(valid) + 0.00001)
         return loss, dice_loss, bce_loss
 
@@ -349,8 +353,8 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
             else:
                 log_print('WARNING: dry_run flag is ON! Not Saving Model')
             log_print('Closing gracefully')
-            coord.request_stop()
-            coord.join()
+#            coord.request_stop()
+#            coord.join()
             log_print('Done')
 
 
