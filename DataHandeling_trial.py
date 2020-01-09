@@ -41,7 +41,7 @@ class CTCRAMReaderSequence2D(object):
     def _read_sequence_to_ram_(self):
         sequence_folder = self.sequence_folder
         utils.log_print('Reading Sequence')
-        with open(os.path.join(sequence_folder, 'full_csv.pkl'), 'rb') as fobj:
+        with open(os.path.join(sequence_folder, 'full_csv_prova.pkl'), 'rb') as fobj:
             metadata = pickle.load(fobj)
 
         filename_list = metadata['filelist']
@@ -68,12 +68,11 @@ class CTCRAMReaderSequence2D(object):
                 img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
                 img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
                 if filename_list[index - self.unroll_len + j +1][1] == 'None':
-                    seg = np.ones(img.shape[:2]) * (-1)
+                    seg = np.ones(img.shape[:2]) * (0)
                 else:
-                    seg = Image.open(os.path.join(sequence_folder, 'labels', 
-                                                  filename_list[index - self.unroll_len + j +1][1]))
-                    seg = np.array(seg)
-                seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                    seg = cv2.imread(os.path.join(sequence_folder, 'labels', 
+                                                  filename_list[index - self.unroll_len + j +1][1]), -1)
+                    seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
                 seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
 #            num_ones = num_ones + np.count_nonzero(seg)
 #            num_zeros = num_zeros + (self.reshape_size[0]*self.reshape_size[1] - np.count_nonzero(seg))
@@ -197,7 +196,6 @@ class CTCRAMReaderSequence2D(object):
 #                    filename_idx.reverse()
 #                if random_sub_sample:
 #                    filename_idx = filename_idx[::random_sub_sample]
-                seq_len = len(filename_idx)
 #                remainder = seq_len % unroll_len
 #
 #                if remainder:
@@ -218,7 +216,6 @@ class CTCRAMReaderSequence2D(object):
                 is_last = []
                 all_fnames = []
                 for t, file_idx in enumerate(filename_idx):
-                    all_times = [time.time()]
                     filename = seq_data['file_list'][file_idx][0]
                     img_crop = img_crops[file_idx].copy()
                     seg_crop = seg_crops[file_idx].copy()

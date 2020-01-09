@@ -24,7 +24,6 @@ class CTCParams(ParamsBase):
     # --------General-------------
     experiment_name = 'MyRun_SIM'
     gpu_id = 0  # set -1 for CPU or GPU index for GPU.
-    trial = 1
 
     #  ------- Data -------
     data_provider_class = DataHandeling.CTCRAMReaderSequence2D
@@ -41,7 +40,7 @@ class CTCParams(ParamsBase):
 
 
     # -------- Training ----------
-    num_iterations = 10000
+    num_iterations = 50000
     validation_interval = 10
     print_to_console_interval = 10
 
@@ -50,7 +49,7 @@ class CTCParams(ParamsBase):
     load_checkpoint_path = ''  # Used only if load_checkpoint is True
     continue_run = False
     save_checkpoint_dir = ROOT_SAVE_DIR
-    save_checkpoint_iteration = 100
+    save_checkpoint_iteration = 5000
     save_checkpoint_every_N_hours = 24
     save_checkpoint_max_to_keep = 5
 

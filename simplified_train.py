@@ -63,13 +63,15 @@ class LossFunction:
         return loss
 
     def bce_dice_loss(self, y_true, y_pred):
-        valid  = np.zeros((y_true.shape)).astype(np.float32)
-        valid[:, -1] = 1
-        y_true = y_true * valid
-        y_pred = y_pred * valid
         bce_loss = losses.binary_crossentropy(y_true, y_pred)
         dice_loss = self.dice_loss(y_true, y_pred)
         loss = bce_loss + dice_loss
+        valid  = np.zeros((loss.shape)).astype(np.float32)
+        valid[:, -1] = 1
+#        y_true = y_true * valid
+#        y_pred = y_pred * valid
+        loss = loss * valid
+        loss = tf.reduce_sum(loss) / (tf.reduce_sum(valid) + 0.00001)
         return loss, dice_loss, bce_loss
 
 
@@ -85,14 +87,19 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
         val_data_provider.start_queues(coord)
 
         # Model
-        net_kernel_params = Net_type(dropout, (l1, l2), kern_init)[NN_type]
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input)
+        net_kernel_params = Net_type(dropout, (l1, l2), kern_init)['original_net']
+#        net_kernel_params = Net_type(dropout, (l1, l2), kern_init)[NN_type]
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, False)
         # Losses and Metrics
         loss_fn = LossFunction()
         train_loss = k.metrics.Mean(name='train_loss')
         train_metrics = METRICS
         val_loss = k.metrics.Mean(name='val_loss')
         val_metrics = METRICS
+        final_train_loss = 0
+        final_val_loss = 0
+        final_train_prec = 0
+        final_val_prec = 0
 
 
         # Save Checkpoints
@@ -131,13 +138,12 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
         def train_step(image, label): 
             with tf.GradientTape() as tape:
                 predictions, softmax = model(image, True)
-#                print(softmax.shape)
 #                model.summary()
                 loss, dice_loss, bce_loss = loss_fn.bce_dice_loss(label, softmax)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             ckpt.step.assign_add(1)
-            train_loss(loss[:, -1])
+            train_loss(loss)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
@@ -150,7 +156,7 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
         def val_step(image, label):
             predictions, softmax = model(image, False)
             t_loss, t_dice_loss, t_bce_loss = loss_fn.bce_dice_loss(label, softmax)
-            val_loss(t_loss[:, -1])
+            val_loss(t_loss)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
