@@ -5,10 +5,8 @@ import glob
 import cv2
 import numpy as np
 import pickle
-import utils
-import time
 import scipy
-from PIL import Image
+from sklearn.model_selection import train_test_split
 
 class CTCRAMReaderSequence2D(object):
     def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, deal_with_end=0, batch_size=4,
@@ -31,9 +29,10 @@ class CTCRAMReaderSequence2D(object):
         self.num_threads = num_threads
         self.width_shift_range = 0.1
         self.height_shift_range = 0.1
-        self.used_masks = []
-    
+        self.used_masks_train = []
+        self.used_masks_val = []
         np.random.seed(1)
+        self.filename_list_train, self.filename_list_val, self.metadata = self.dataset_split()
 
 
     @staticmethod
@@ -47,31 +46,48 @@ class CTCRAMReaderSequence2D(object):
         out_img = (image - img_mean) * factor + img_mean
         return out_img
     
-    def read_batch(self):
+    def get_steps(self):
         sequence_folder = self.sequence_folder
         with open(os.path.join(sequence_folder, 'full_csv_prova.pkl'), 'rb') as fobj:
             metadata = pickle.load(fobj)
-    
         filename_list = metadata['filelist']
-        
-        if len(metadata['shape'])== 3:
-            img_size = self.reshape_size + (metadata['shape'][-1],)
-#            all_images = np.zeros((self.batch_size, self.unroll_len, img_size[0], img_size[1], img_size[2])).astype(np.float32)
+        valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
+        return len(valid_masks)
+    
+    def dataset_split(self):
+        sequence_folder = self.sequence_folder
+        with open(os.path.join(sequence_folder, 'full_csv_prova.pkl'), 'rb') as fobj:
+            metadata = pickle.load(fobj)
+        filename_list = metadata['filelist']
+        filename_list_train, filename_list_val = train_test_split(filename_list, 0.3)
+        return filename_list_train, filename_list_val, metadata
+    
+    def read_batch(self, flag):
+        if len(self.metadata['shape'])== 3:
+            img_size = self.reshape_size + (self.metadata['shape'][-1],)
             all_images = []
         else:
             img_size = self.reshape_size      
-#            all_images = np.zeros((self.batch_size, self.unroll_len, img_size[0], img_size[1])).astype(np.float32)
             all_images = []
-#        all_seg = np.zeros((self.batch_size, self.unroll_len, img_size[0], img_size[1])).astype(np.float32)
         all_seg = []
-    
-        valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
-        valid_masks = [i for i in valid_masks if i not in self.used_masks]
-        batch_index = random.sample(valid_masks, self.batch_size)
-        self.used_masks.extend(batch_index)
-        valid_future_masks = [i for i in valid_masks if i not in self.used_masks]
+        if flag == 'train':
+            valid_masks = [i for i, x in enumerate(self.filename_list_train) if x[1] != 'None']
+            valid_masks = [i for i in valid_masks if i not in self.used_masks_train]
+            batch_index = random.sample(valid_masks, self.batch_size)
+            self.used_masks_train.extend(batch_index)
+            valid_future_masks = [i for i in valid_masks if i not in self.used_masks_train]
+        else:
+            valid_masks = [i for i, x in enumerate(self.filename_list_val) if x[1] != 'None']
+            valid_masks = [i for i in valid_masks if i not in self.used_masks_val]
+            batch_index = random.sample(valid_masks, self.batch_size)
+            self.used_masks_val.extend(batch_index)
+            valid_future_masks = [i for i in valid_masks if i not in self.used_masks_val]
+            
         if len(valid_future_masks)<self.batch_size:
-            self.used_masks = []
+            if flag == 'train':
+                self.used_masks_train = []
+            else:
+                self.used_masks_val = []
             is_last_batch = np.array([0, 0, 0, 0]).astype(np.float32)
             is_last_batch = is_last_batch.tolist()
         else:
@@ -81,10 +97,6 @@ class CTCRAMReaderSequence2D(object):
         for i in range (0, self.batch_size):
             image_seq = []
             seg_seq = []
-            if len(metadata['shape'])==3:
-                    img_size = self.reshape_size + (metadata['shape'][-1],)
-            else:
-                img_size = self.reshape_size
             if img_size[0] - self.sub_seq_size[0] > 0:
                 crop_y = np.random.randint(0, img_size[0] - self.sub_seq_size[0]) if self.randomize else 0
             else:
@@ -98,6 +110,7 @@ class CTCRAMReaderSequence2D(object):
             crop_x_stop = crop_x + self.sub_seq_size[1]
             flip = np.random.randint(0, 2, 2) if self.randomize else [0, 0]
             rotate = np.random.randint(0, 4) if self.randomize else 0
+            jump = np.random.randint(1,4) if self.randomize else 1
             
             if self.width_shift_range or self.height_shift_range:
                 if self.width_shift_range:
@@ -106,18 +119,29 @@ class CTCRAMReaderSequence2D(object):
                     height_shift_range = random.uniform(-self.height_shift_range * img_size[1], self.height_shift_range * img_size[1])
     
             for j in range (0, self.unroll_len):
-                img = cv2.imread(os.path.join(sequence_folder, 'train', filename_list[batch_index[i]- self.unroll_len + j + 1][0]), -1)
-                if img is None:
-                    raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename_list[batch_index[i]- self.unroll_len + j +1][0])))
-                img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
-                img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
-                if filename_list[batch_index[i]- self.unroll_len + j + 1][1] == 'None':
-                    seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
+                if flag == 'train':
+                    img = cv2.imread(os.path.join(self.sequence_folder, 'train', self.filename_list_train[batch_index[i] - (self.unroll_len - j - 1)*jump][0]), -1)
+                    if img is None:
+                        raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.filename_list_train[batch_index[i] - (self.unroll_len - j -1)*jump][0])))
+                    img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                    if self.filename_list_train[batch_index[i]- (self.unroll_len - j - 1)*jump][1] == 'None':
+                        seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
+                    else:
+                        seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.filename_list_train[batch_index[i] - (self.unroll_len - j - 1)*jump][1]), -1)
+                        seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
                 else:
-                    seg =cv2.imread(os.path.join(sequence_folder, 'labels', filename_list[batch_index[i] - self.unroll_len + j + 1][1]), -1)
-                    seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                    img = cv2.imread(os.path.join(self.sequence_folder, 'train', self.filename_list_val[batch_index[i] - (self.unroll_len - j - 1)*jump][0]), -1)
+                    if img is None:
+                        raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.filename_list_val[batch_index[i] - (self.unroll_len - j -1)*jump][0])))
+                    img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                    if self.filename_list_val[batch_index[i]- (self.unroll_len - j - 1)*jump][1] == 'None':
+                        seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
+                    else:
+                        seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.filename_list_val[batch_index[i] - (self.unroll_len - j - 1)*jump][1]), -1)
+                        seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                    
+                img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
                 seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
-                
                 img_crop = img[crop_y:crop_y_stop, crop_x:crop_x_stop]
                 img_max = img_crop.max()
                 seg_crop = seg[crop_y:crop_y_stop, crop_x:crop_x_stop]

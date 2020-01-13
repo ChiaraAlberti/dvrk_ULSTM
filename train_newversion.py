@@ -17,7 +17,7 @@ import pandas as pd
 from netdict import Net_type
 import csv 
 import matplotlib.pyplot as plt
-
+from datetime import datetime
 
 try:
     # noinspection PyPackageRequirements
@@ -75,11 +75,11 @@ class LossFunction:
 #        y_true = y_true * valid
 #        y_pred = y_pred * valid
 #        loss = loss * valid
-        loss = tf.reduce_sum(loss) / (tf.reduce_sum(valid) + 0.00001)
+#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(valid) + 0.00001)
         return loss, dice_loss, bce_loss
 
 
-def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_type, params_value):
+def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_value):
    
     device = '/gpu:0' if params.gpu_id >= 0 else '/cpu:0'
     with tf.device(device):
@@ -105,7 +105,7 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
         # Save Checkpoints
 
         lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate = lr, 
+                initial_learning_rate = 0.0005, 
                 decay_steps=100000,
                 decay_rate=lr_decay, 
                 staircase=True)
@@ -150,7 +150,6 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(train_metrics):
-#                metric(label[:,-1], softmax[:,-1])
                 metric(label[:, -1], softmax[:,-1])
                 train_metrics[i] = metric
             return softmax, predictions, loss
@@ -165,7 +164,6 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(val_metrics):
-#                metric(label[:,-1], softmax[:,-1])
                 metric(label[:, -1], softmax[:, -1])
                 val_metrics[i] = metric
             return softmax, predictions, t_loss
@@ -247,16 +245,21 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, is_last_batch = train_data_provider.read_batch()
+                image_sequence, seg_sequence, is_last_batch = train_data_provider.read_batch('train')
 #                show_dataset_labels(image_sequence, seg_sequence)
                 if params.profile:
-                        tf.summary.trace_on(graph=True, profiler=True)
+                    graph_dir = os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
+                    tf.summary.trace_on(graph=True, profiler=True)
+                    graph_summary_writer = tf.summary.create_file_writer(graph_dir)
                 
                 train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
                 bw_predictions = post_processing(train_output_sequence)
 
+                if int(ckpt.step)==1:
+                    k.utils.plot_model(model, os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'model_nn.png'), show_shapes=True)
+                
                 if params.profile:
-                    with train_summary_writer.as_default():
+                    with graph_summary_writer.as_default():
                         tf.summary.trace_export('train_step', step=int(ckpt.step),
                                                 profiler_outdir=params.experiment_log_dir)
                 model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
@@ -291,7 +294,7 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 if not int(ckpt.step) % params.validation_interval:
                     train_states = model.get_states()
                     model.set_states(val_states)
-                    (val_image_sequence, val_seg_sequence, is_last_batch) = val_data_provider.read_batch()
+                    (val_image_sequence, val_seg_sequence, is_last_batch) = val_data_provider.read_batch('val')
                     val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
                                                                                     val_seg_sequence)
                     bw_predictions = post_processing(val_output_sequence)
@@ -503,19 +506,17 @@ if __name__ == '__main__':
                                 params_value[7] = NN_type
                                 for _, kern_init in enumerate(dict_param['Kernel init']):
                                     params_value[8] = kern_init
-                                    for _, crop_size in enumerate(dict_param['Crop']):
-                                        params_value[9] = crop_size
-                                        params_value[0] = model_number
-                                        train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_type, params_value)
-                                        with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
-                                            reader = csv.reader(csv_file)
-                                            model_dict = dict(reader)
-                                            complete_dict.append(model_dict)
-                                        model_number += 1
-                                        with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
-                                            writer = csv.DictWriter(f, complete_dict[0].keys())
-                                            writer.writeheader()
-                                            writer.writerows(complete_dict)
+                                    params_value[0] = model_number
+                                    train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_value)
+                                    with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
+                                        reader = csv.reader(csv_file)
+                                        model_dict = dict(reader)
+                                        complete_dict.append(model_dict)
+                                    model_number += 1
+                                    with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
+                                        writer = csv.DictWriter(f, complete_dict[0].keys())
+                                        writer.writeheader()
+                                        writer.writerows(complete_dict)
 
 with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
     writer = csv.DictWriter(f, complete_dict[0].keys())

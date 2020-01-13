@@ -179,13 +179,13 @@ class ULSTMnet2D(k.Model):
         for down_layer in self.DownLayers:
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
-        out_skip = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(out_skip)
+#        out_skip = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(out_skip)
         up_input = out_skip
         skip_inputs.reverse()
         assert len(skip_inputs) == len(self.UpLayers)
         for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
-            if up_layer == self.last_layer:
-                up_layer = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(up_layer)
+#            if up_layer == self.last_layer:
+#                up_layer = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(up_layer)
             up_input = up_layer((up_input, skip_input), training=training, mask=mask)
         logits_output_shape = up_input.shape
         logits_output = tf.reshape(up_input, [input_shape[0], input_shape[1], logits_output_shape[1],

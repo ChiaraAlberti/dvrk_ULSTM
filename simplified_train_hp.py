@@ -304,7 +304,7 @@ def train(run_folder, hparams, params_value):
                     with tf.summary.create_file_writer(run_folder).as_default():
                         hp.hparams(hparams)  # record the values used in this trial
                         precision = final_train_prec
-                        tf.summary.scalar(METRIC_ACCURACY, precision, step=1)
+                        tf.summary.scalar(METRIC_ACCURACY, precision, step=ckpt.step)
 
 
         except (KeyboardInterrupt, ValueError, AWSError) as err:
