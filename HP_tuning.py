@@ -5,7 +5,7 @@ import pickle
 import Networks_our as Nets
 import Params_our as Params
 import tensorflow as tf
-import DataHandeling_modified as DataHandeling
+import DataHandeling
 import sys
 from utils import log_print
 import requests
@@ -454,7 +454,6 @@ if __name__ == '__main__':
     input_args = arg_parser.parse_args()
     args_dict = {key: val for key, val in vars(input_args).items() if not (val is None)}
     print(args_dict)
-    params = Params.CTCParams(args_dict)
     # params = Params.CTCParamsNoLSTM(args_dict)
 
     # try:
@@ -481,7 +480,7 @@ if __name__ == '__main__':
     HP_KERNELINIT = hp.HParam('Kern_init', hp.Discrete(dict_param['Kernel init']))
     METRIC_ACCURACY = 'precision'
 
-    with tf.summary.create_file_writer(os.path.join(params.experiment_log_dir, 'hparam_tuning')).as_default():
+    with tf.summary.create_file_writer(os.path.join(Params.experiment_log_dir, 'hparam_tuning')).as_default():
         hp.hparams_config(
           hparams=[HP_LEARNINGRATE, HP_LEARNINGRATEDECAY, HP_KERNELINIT],
           metrics=[hp.Metric(METRIC_ACCURACY, display_name='precision')],
@@ -503,6 +502,7 @@ if __name__ == '__main__':
                 run_name = "run-%d" % model_number
                 print('--- Starting trial: %s' % run_name)
                 print({h.name: hparams[h] for h in hparams})
+                params = Params.CTCParams(args_dict)
                 train(os.path.join(params.experiment_log_dir, 'hparam_tuning/') + run_name, hparams, params_value)
                 model_number += 1
                 

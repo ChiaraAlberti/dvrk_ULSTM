@@ -2,10 +2,10 @@ import argparse
 import os
 import pickle
 # noinspection PyPackageRequirements
-import Networks_our as Nets
-import Params_our as Params
+import Networks as Nets
+import Params_threads as Params
 import tensorflow as tf
-import DataHandeling_our as DataHandeling
+import DataHandeling_threads as DataHandeling
 import sys
 from utils import log_print
 import requests
