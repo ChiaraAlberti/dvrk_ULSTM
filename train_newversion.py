@@ -19,6 +19,7 @@ import csv
 import matplotlib.pyplot as plt
 from datetime import datetime
 
+
 try:
     # noinspection PyPackageRequirements
     import tensorflow.python.keras as k
@@ -88,7 +89,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
         val_data_provider = params.val_data_provider
 
         # Model
-        net_kernel_params = Net_type(dropout, (l1, l2), kern_init)['original_net']
+        net_kernel_params = Net_type(0, (0, 0), kern_init)['original_net']
         model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, False)
         # Losses and Metrics
         loss_fn = LossFunction()
@@ -100,6 +101,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
         final_val_loss = 0
         final_train_prec = 0
         final_val_prec = 0
+
 
 
         # Save Checkpoints
@@ -185,13 +187,13 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                     for scalar_loss_name, scalar_loss in scalar_loss_dict.items():
                         if (scalar_loss_name == 'LUT values'):
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'TruePositive')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result().numpy()/ckpt.step, step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result().numpy(), step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'FalsePositive')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result().numpy()/ckpt.step, step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result().numpy(), step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'TrueNegative')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result().numpy()/ckpt.step, step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result().numpy(), step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'FalseNegative')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[3].result().numpy()/ckpt.step, step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[3].result().numpy(), step=step)
                         elif (scalar_loss_name == 'Model evaluation'):
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'Accuracy')).as_default():
                                tf.summary.scalar(scalar_loss_name, scalar_loss[0].result(), step=step)
@@ -208,8 +210,8 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                         
         def post_processing(images):
             images_shape = images.shape
-            im_reshaped = np.reshape(images, (images_shape[0]*images_shape[1], images_shape[2], images_shape[3]))
-            bw_predictions = np.zeros((im_reshaped.shape[0], im_reshaped.shape[1], im_reshaped.shape[2])).astype(np.float32)
+            im_reshaped = np.reshape(images, (images.shape[0], images.shape[1], images.shape[2]))
+            bw_predictions = np.zeros((images.shape[0], images.shape[1], images.shape[2])).astype(np.float32)
             for i in range(0, images.shape[0]):
                 ret, bw_predictions[i] = cv2.threshold(im_reshaped[i],0.8, 1 ,cv2.THRESH_BINARY)
             bw_predictions = np.reshape(bw_predictions, images_shape)
@@ -245,18 +247,20 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, is_last_batch = train_data_provider.read_batch('train')
+                image_sequence, seg_sequence, is_last_batch = train_data_provider.read_batch('train', False, None, None)
 #                show_dataset_labels(image_sequence, seg_sequence)
+                for i in range(0, 4):
+                    train_metrics[i].reset_states()
+                
                 if params.profile:
                     graph_dir = os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
                     tf.summary.trace_on(graph=True, profiler=True)
                     graph_summary_writer = tf.summary.create_file_writer(graph_dir)
                 
                 train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
-                bw_predictions = post_processing(train_output_sequence)
-
-                if int(ckpt.step)==1:
-                    k.utils.plot_model(model, os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'model_nn.png'), show_shapes=True)
+                bw_predictions = post_processing(train_output_sequence[:, -1])
+#                if int(ckpt.step)==1:
+#                    k.utils.plot_model(model, os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'model_nn.png'), show_shapes=True)
                 
                 if params.profile:
                     with graph_summary_writer.as_default():
@@ -273,7 +277,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                         train_imgs_dict['Image'] = display_image
                         train_imgs_dict['GT'] = seg_sequence[:, -1]
                         train_imgs_dict['Output'] = train_output_sequence[:, -1]
-                        train_imgs_dict['Output_bw'] = bw_predictions[:, -1]
+                        train_imgs_dict['Output_bw'] = bw_predictions
                         tboard(train_summary_writer, train_log_dir, int(ckpt.step), train_scalars_dict, train_imgs_dict)
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -294,10 +298,10 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                 if not int(ckpt.step) % params.validation_interval:
                     train_states = model.get_states()
                     model.set_states(val_states)
-                    (val_image_sequence, val_seg_sequence, is_last_batch) = val_data_provider.read_batch('val')
+                    (val_image_sequence, val_seg_sequence, is_last_batch) = val_data_provider.read_batch('val', False, None, None)
                     val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
                                                                                     val_seg_sequence)
-                    bw_predictions = post_processing(val_output_sequence)
+                    bw_predictions = post_processing(val_output_sequence[:, -1])
                     model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
                     #calling the function that writes the dictionaries on tensorboard
                     if not params.dry_run:
@@ -307,7 +311,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                         val_imgs_dict['Image'] = display_image
                         val_imgs_dict['GT'] = val_seg_sequence[:, -1]
                         val_imgs_dict['Output'] = val_output_sequence[:, -1]
-                        val_imgs_dict['Output_bw'] = bw_predictions[:, -1]
+                        val_imgs_dict['Output_bw'] = bw_predictions
                         tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict)
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -482,7 +486,7 @@ if __name__ == '__main__':
     #     log_print('Done')
     
 
-    df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list.csv')
+    df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list_full.csv')
     df.fillna(4,inplace=True)
     dict_param = df.to_dict(orient='list')
     dict_param = {k:[elem for elem in v if elem !=4] for k,v in dict_param.items()}

@@ -5,7 +5,7 @@ import pickle
 import Networks_our as Nets
 import Params_our as Params
 import tensorflow as tf
-import DataHandeling_trial as DataHandeling
+import DataHandeling_modified as DataHandeling
 import sys
 from utils import log_print
 import requests
@@ -74,7 +74,7 @@ class LossFunction:
 #        y_true = y_true * valid
 #        y_pred = y_pred * valid
 #        loss = loss * valid
-        loss = tf.reduce_sum(loss) / (tf.reduce_sum(valid) + 0.00001)
+#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(valid) + 0.00001)
         return loss, dice_loss, bce_loss
 
 
@@ -85,14 +85,11 @@ def train(run_folder, hparams, params_value):
         # Data input
         train_data_provider = params.train_data_provider
         val_data_provider = params.val_data_provider
-#        coord = tf.train.Coordinator()
-#        train_data_provider.start_queues(coord)
-#        val_data_provider.start_queues(coord)
 
         # Model
-        net_kernel_params = Net_type(hparams[HP_DROPOUT], (hparams[HP_L1], hparams[HP_L2]), hparams[HP_KERNELINIT])[hparams[HP_TYPENN]]
+        net_kernel_params = Net_type(0, (0, 0), hparams[HP_KERNELINIT])['original_net']
         # net_kernel_params = Net_type(dropout, (l1, l2), kern_init)['longLSTM_net']
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, hparams[HP_DROPINPUT])
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, False)
         # Losses and Metrics
         loss_fn = LossFunction()
         train_loss = k.metrics.Mean(name='train_loss')
@@ -227,7 +224,7 @@ def train(run_folder, hparams, params_value):
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, is_last_batch = train_data_provider.read_batch()
+                image_sequence, seg_sequence, is_last_batch = train_data_provider.read_batch('train')
                 
                 if params.profile:
                         tf.summary.trace_on(graph=True, profiler=True)
@@ -271,7 +268,7 @@ def train(run_folder, hparams, params_value):
                 if not int(ckpt.step) % params.validation_interval:
                     train_states = model.get_states()
                     model.set_states(val_states)
-                    (val_image_sequence, val_seg_sequence, val_is_last_batch) = val_data_provider.read_batch()
+                    (val_image_sequence, val_seg_sequence, val_is_last_batch) = val_data_provider.read_batch('val')
                     val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
                                                                                     val_seg_sequence)
                     bw_predictions = post_processing(val_output_sequence)
@@ -297,13 +294,13 @@ def train(run_folder, hparams, params_value):
                     val_states = model.get_states()
                     model.set_states(train_states)
                 if ckpt.step == params.num_iterations:
-                    final_train_loss = train_loss.result()
-                    final_val_loss = val_loss.result()
-                    final_train_prec = train_metrics[5].result() * 100
-                    final_val_prec = train_metrics[5].result() * 100
+                    final_train_loss = train_loss.result().numpy()
+                    final_val_loss = val_loss.result().numpy()
+                    final_train_prec = train_metrics[5].result().numpy() * 100
+                    final_val_prec = train_metrics[5].result().numpy() * 100
                     with tf.summary.create_file_writer(run_folder).as_default():
                         hp.hparams(hparams)  # record the values used in this trial
-                        precision = final_train_prec
+                        precision = train_metrics[5].result()
                         tf.summary.scalar(METRIC_ACCURACY, precision, step=ckpt.step)
 
 
@@ -471,66 +468,51 @@ if __name__ == '__main__':
     dict_param = df.to_dict(orient='list')
     dict_param = {k:[elem for elem in v if elem !=4] for k,v in dict_param.items()}
     complete_dict = []
-    params_value = [None]*10
+    params_value = [None]*4
     model_number = 0
     
-    HP_DROPOUT = hp.HParam('dropout', hp.Discrete(dict_param['Dropout']))
-    HP_DROPINPUT = hp.HParam('drop input', hp.Discrete(dict_param['Drop_input']))
+#    HP_DROPOUT = hp.HParam('dropout', hp.Discrete(dict_param['Dropout']))
+#    HP_DROPINPUT = hp.HParam('drop input', hp.Discrete(dict_param['Drop_input']))
     HP_LEARNINGRATE = hp.HParam('lr', hp.Discrete(dict_param['Learning rate']))
     HP_LEARNINGRATEDECAY = hp.HParam('lr_decay', hp.Discrete(dict_param['Learning rate decay']))
-    HP_L1 = hp.HParam('l1', hp.Discrete(dict_param['L1']))
-    HP_L2 = hp.HParam('l2', hp.Discrete(dict_param['L2']))
-    HP_TYPENN = hp.HParam('NN_type', hp.Discrete(dict_param['Type of NN']))
+#    HP_L1 = hp.HParam('l1', hp.Discrete(dict_param['L1']))
+#    HP_L2 = hp.HParam('l2', hp.Discrete(dict_param['L2']))
+#    HP_TYPENN = hp.HParam('NN_type', hp.Discrete(dict_param['Type of NN']))
     HP_KERNELINIT = hp.HParam('Kern_init', hp.Discrete(dict_param['Kernel init']))
     METRIC_ACCURACY = 'precision'
 
     with tf.summary.create_file_writer(os.path.join(params.experiment_log_dir, 'hparam_tuning')).as_default():
         hp.hparams_config(
-          hparams=[HP_DROPOUT, HP_DROPINPUT, HP_LEARNINGRATE, HP_LEARNINGRATEDECAY,
-                   HP_L1, HP_L2, HP_TYPENN, HP_KERNELINIT],
+          hparams=[HP_LEARNINGRATE, HP_LEARNINGRATEDECAY, HP_KERNELINIT],
           metrics=[hp.Metric(METRIC_ACCURACY, display_name='precision')],
         )
   
-    for dropout in HP_DROPOUT.domain.values:
-        params_value[1] = dropout
-        for drop_input in HP_DROPINPUT.domain.values:
-          params_value[2] = drop_input
-          for lr in HP_LEARNINGRATE.domain.values:
-            params_value[3] = lr
-            for lr_decay in HP_LEARNINGRATEDECAY.domain.values:
-                params_value[4] = lr_decay
-                for l1 in HP_L1.domain.values:
-                    params_value[5] = l1
-                    for l2 in HP_L2.domain.values:
-                        params_value[6] = l2
-                        for NN_type in HP_TYPENN.domain.values:
-                            params_value[7] = NN_type
-                            for kern_init in HP_KERNELINIT.domain.values:
-                                params_value[8] = kern_init
-                                params_value[0] = model_number
-                                hparams = {
-                                    HP_DROPOUT: dropout,
-                                    HP_DROPINPUT: drop_input,
-                                    HP_LEARNINGRATE: lr,
-                                    HP_LEARNINGRATEDECAY: lr_decay,
-                                    HP_L1: l1,
-                                    HP_L2: l2,
-                                    HP_TYPENN: NN_type,
-                                    HP_KERNELINIT: kern_init,
-                                }
-                                run_name = "run-%d" % model_number
-                                print('--- Starting trial: %s' % run_name)
-                                print({h.name: hparams[h] for h in hparams})
-                                train(os.path.join(params.experiment_log_dir, 'hparam_tuning/') + run_name, hparams, params_value)
-                                model_number += 1
-                                
-                                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
-                                    reader = csv.reader(csv_file)
-                                    model_dict = dict(reader)
-                                    complete_dict.append(model_dict)
-                                with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
-                                    writer = csv.DictWriter(f, complete_dict[0].keys())
-                                    writer.writeheader()
-                                    writer.writerows(complete_dict)
+
+    for lr in HP_LEARNINGRATE.domain.values:
+        params_value[1] = lr
+        for lr_decay in HP_LEARNINGRATEDECAY.domain.values:
+            params_value[2] = lr_decay
+            for kern_init in HP_KERNELINIT.domain.values:
+                params_value[3] = kern_init
+                params_value[0] = model_number
+                hparams = {
+                    HP_LEARNINGRATE: lr,
+                    HP_LEARNINGRATEDECAY: lr_decay,
+                    HP_KERNELINIT: kern_init,
+                }
+                run_name = "run-%d" % model_number
+                print('--- Starting trial: %s' % run_name)
+                print({h.name: hparams[h] for h in hparams})
+                train(os.path.join(params.experiment_log_dir, 'hparam_tuning/') + run_name, hparams, params_value)
+                model_number += 1
+                
+                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
+                    reader = csv.reader(csv_file)
+                    model_dict = dict(reader)
+                    complete_dict.append(model_dict)
+                with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
+                    writer = csv.DictWriter(f, complete_dict[0].keys())
+                    writer.writeheader()
+                    writer.writerows(complete_dict)
 
 

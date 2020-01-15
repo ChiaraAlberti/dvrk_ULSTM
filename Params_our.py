@@ -31,7 +31,7 @@ class CTCParams(ParamsBase):
     crop_size = (64, 64)  # (height, width) preferably height=width 
     reshape_size = (64, 64)
     batch_size = 4
-    unroll_len = 4
+    unroll_len = 6
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
     train_q_capacity = 200
     val_q_capacity = 200
@@ -40,7 +40,7 @@ class CTCParams(ParamsBase):
 
 
     # -------- Training ----------
-    num_iterations = 20000
+    num_iterations = 100000
     validation_interval = 10
     print_to_console_interval = 10
 
@@ -107,11 +107,13 @@ class CTCParams(ParamsBase):
                 save_dir = os.path.dirname(os.path.dirname(self.load_checkpoint_path))
                 self.experiment_log_dir = self.experiment_save_dir = save_dir
                 self.load_checkpoint_path = os.path.join(self.load_checkpoint_path, 'tf-ckpt')
+                self.experiment_k_fold_dir = os.path.join(self.save_checkpoint_dir, self.tb_sub_folder, 'k_fold')
         else:
             self.experiment_log_dir = os.path.join(self.save_log_dir, self.tb_sub_folder, self.experiment_name,
                                                    now_string)
             self.experiment_save_dir = os.path.join(self.save_checkpoint_dir, self.tb_sub_folder, self.experiment_name,
                                                     now_string)
+            self.experiment_k_fold_dir = os.path.join(self.save_checkpoint_dir, self.tb_sub_folder, 'k_fold')
         if not self.dry_run:
             os.makedirs(self.experiment_log_dir, exist_ok=True)
             os.makedirs(self.experiment_save_dir, exist_ok=True)
