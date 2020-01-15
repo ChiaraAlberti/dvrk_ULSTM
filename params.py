@@ -31,7 +31,7 @@ class CTCParams(ParamsBase):
     crop_size = (64, 64)  # (height, width) preferably height=width 
     reshape_size = (64, 64)
     batch_size = 4
-    unroll_len = 4
+    unroll_len = 6
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
     train_q_capacity = 200
     val_q_capacity = 200
@@ -40,7 +40,7 @@ class CTCParams(ParamsBase):
 
 
     # -------- Training ----------
-    num_iterations = 20000
+    num_iterations = 10
     validation_interval = 10
     print_to_console_interval = 10
 
@@ -72,7 +72,7 @@ class CTCParams(ParamsBase):
         else:
             os.environ['CUDA_VISIBLE_DEVICES'] = "-1"    
 
-        self.train_data_provider = self.data_provider_class(sequence_folder_list=self.root_data_dir,
+        self.data_provider = self.data_provider_class(sequence_folder_list=self.root_data_dir,
                                                             image_crop_size=self.crop_size,
                                                             image_reshape_size = self.reshape_size,
                                                             unroll_len=self.unroll_len,
@@ -83,17 +83,7 @@ class CTCParams(ParamsBase):
                                                             randomize=True,
                                                             num_threads=self.num_train_threads
                                                             )
-        self.val_data_provider = self.data_provider_class(sequence_folder_list=self.root_data_dir,
-                                                          image_crop_size=self.crop_size,
-                                                          image_reshape_size = self.reshape_size, 
-                                                          unroll_len=self.unroll_len,
-                                                          deal_with_end=0,
-                                                          batch_size=self.batch_size,
-                                                          queue_capacity=self.train_q_capacity,
-                                                          data_format=self.data_format,
-                                                          randomize=True,
-                                                          num_threads=self.num_val_threads
-                                                          )
+
 
         now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
         if self.load_checkpoint and self.continue_run:
@@ -125,39 +115,39 @@ class CTCParams(ParamsBase):
                 os.environ['LD_LIBRARY_PATH'] += ':/usr/local/cuda/extras/CUPTI/lib64/'
 
 
-class CTCInferenceParams(ParamsBase):
-
-    gpu_id = 0  # for CPU ise -1 otherwise gpu id
-    model_path = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2019-12-11_175726' # download from https://drive.google.com/file/d/1uQOdelJoXrffmW_1OCu417nHKtQcH3DJ/view?usp=sharing
-    output_path = '/home/stormlab/seg/Output/sample'
-    sequence_path = os.path.join(ROOT_TEST_DATA_DIR, 'tissues')
-    filename_format = '*.tif'  # default format for CTC
-    reshape_size = (64, 64)
-
-    data_reader = DataHandeling.CTCInferenceReader
-    data_format = 'NHWC'  # 'NCHW' or 'NHWC'
-    pre_sequence_frames = 4  # Initialize the sequence with first pre_sequence_frames played in reverse
-
-    # ---------Debugging---------
-
-    dry_run = False
-    save_intermediate = True
-    save_intermediate_path = output_path
-
-    def __init__(self, params_dict: dict = None):
-        if params_dict is not None:
-            self._override_params_(params_dict)
-        self.channel_axis = 1 if self.data_format == 'NCHW' else 3
-        if not self.dry_run:
-            os.makedirs(self.output_path, exist_ok=True)
-            if self.save_intermediate:
-                now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-                self.save_intermediate_path = os.path.join(self.save_intermediate_path,'IntermediateImages', now_string)
-                self.save_intermediate_vis_path = os.path.join(self.save_intermediate_path, 'Softmax')
-                self.save_intermediate_label_path = os.path.join(self.save_intermediate_path, 'Labels')
-                os.makedirs(self.save_intermediate_path, exist_ok=True)
-                os.makedirs(self.save_intermediate_vis_path, exist_ok=True)
-                os.makedirs(self.save_intermediate_label_path, exist_ok=True)
+#class CTCInferenceParams(ParamsBase):
+#
+#    gpu_id = 0  # for CPU ise -1 otherwise gpu id
+#    model_path = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2019-12-11_175726' # download from https://drive.google.com/file/d/1uQOdelJoXrffmW_1OCu417nHKtQcH3DJ/view?usp=sharing
+#    output_path = '/home/stormlab/seg/Output/sample'
+#    sequence_path = os.path.join(ROOT_TEST_DATA_DIR, 'tissues')
+#    filename_format = '*.tif'  # default format for CTC
+#    reshape_size = (64, 64)
+#
+#    data_reader = DataHandeling.CTCInferenceReader
+#    data_format = 'NHWC'  # 'NCHW' or 'NHWC'
+#    pre_sequence_frames = 4  # Initialize the sequence with first pre_sequence_frames played in reverse
+#
+#    # ---------Debugging---------
+#
+#    dry_run = False
+#    save_intermediate = True
+#    save_intermediate_path = output_path
+#
+#    def __init__(self, params_dict: dict = None):
+#        if params_dict is not None:
+#            self._override_params_(params_dict)
+#        self.channel_axis = 1 if self.data_format == 'NCHW' else 3
+#        if not self.dry_run:
+#            os.makedirs(self.output_path, exist_ok=True)
+#            if self.save_intermediate:
+#                now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+#                self.save_intermediate_path = os.path.join(self.save_intermediate_path,'IntermediateImages', now_string)
+#                self.save_intermediate_vis_path = os.path.join(self.save_intermediate_path, 'Softmax')
+#                self.save_intermediate_label_path = os.path.join(self.save_intermediate_path, 'Labels')
+#                os.makedirs(self.save_intermediate_path, exist_ok=True)
+#                os.makedirs(self.save_intermediate_vis_path, exist_ok=True)
+#                os.makedirs(self.save_intermediate_label_path, exist_ok=True)
 
 
 

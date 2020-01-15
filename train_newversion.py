@@ -3,7 +3,7 @@ import os
 import pickle
 # noinspection PyPackageRequirements
 import Networks_our as Nets
-import Params_our as Params
+import params as Params
 import tensorflow as tf
 import DataHandeling_modified as DataHandeling
 import sys
@@ -85,8 +85,8 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
     device = '/gpu:0' if params.gpu_id >= 0 else '/cpu:0'
     with tf.device(device):
         # Data input
-        train_data_provider = params.train_data_provider
-        val_data_provider = params.val_data_provider
+        data_provider = params.data_provider
+
 
         # Model
         net_kernel_params = Net_type(0, (0, 0), kern_init)['original_net']
@@ -97,6 +97,8 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
         train_metrics = METRICS
         val_loss = k.metrics.Mean(name='val_loss')
         val_metrics = METRICS
+        test_loss = k.metrics.Mean(name = 'test_loss')
+        test_metrics = METRICS
         final_train_loss = 0
         final_val_loss = 0
         final_train_prec = 0
@@ -169,17 +171,31 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                 metric(label[:, -1], softmax[:, -1])
                 val_metrics[i] = metric
             return softmax, predictions, t_loss
+        
+        @tf.function
+        def test_step(image, label):
+            predictions, softmax = model(image, False)
+            tt_loss, tt_dice_loss, tt_bce_loss = loss_fn.bce_dice_loss(label, softmax)
+#            val_loss(t_loss[:, -1])
+            test_loss(tt_loss)
+            for i, metric in enumerate(test_metrics):
+                metric(label[:, -1], softmax[:, -1])
+                test_metrics[i] = metric
+            return softmax, predictions, tt_loss
 
         #inizialize directories and dictionaries to use on tensorboard
-        train_summary_writer = val_summary_writer = train_scalars_dict = val_scalars_dict = None
+        train_summary_writer = val_summary_writer = test_summary_writer = train_scalars_dict = val_scalars_dict  = test_scalars_dict = None
         if not params.dry_run:         
             train_log_dir = os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'train')
             val_log_dir = os.path.join(params.experiment_log_dir,'NN_'+ str(params_value[0]), 'val')
+            test_log_dir = os.path.join(params.experiment_log_dir,'NN_'+ str(params_value[0]), 'test')
             train_summary_writer = tf.summary.create_file_writer(train_log_dir)
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
+            test_summary_writer = tf.summary.create_file_writer(test_log_dir)
             
             train_scalars_dict = {'Loss': train_loss,'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
-            val_scalars_dict = {'Loss': val_loss, 'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
+            val_scalars_dict = {'Loss': val_loss, 'LUT values': val_metrics[0:4], 'Model evaluation': val_metrics[4:7]}
+            test_scalars_dict = {'Loss': test_loss, 'LUT values': test_metrics[0:4], 'Model evaluation': test_metrics[4:7]}
 
         def tboard(writer, log_dir, step, scalar_loss_dict, images_dict):
             with tf.device('/cpu:0'):
@@ -241,13 +257,14 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
             val_states = model.get_states()
             train_imgs_dict = {}
             val_imgs_dict = {}
+            test_imgs_dict = {}
             for _ in range(int(ckpt.step), params.num_iterations + 1):
                 if params.aws:
                     r = requests.get('http://169.254.169.254/latest/meta-data/spot/instance-action')
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, is_last_batch = train_data_provider.read_batch('train', False, None, None)
+                image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train', False, None, None)
 #                show_dataset_labels(image_sequence, seg_sequence)
                 for i in range(0, 4):
                     train_metrics[i].reset_states()
@@ -298,7 +315,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                 if not int(ckpt.step) % params.validation_interval:
                     train_states = model.get_states()
                     model.set_states(val_states)
-                    (val_image_sequence, val_seg_sequence, is_last_batch) = val_data_provider.read_batch('val', False, None, None)
+                    (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None, None)
                     val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
                                                                                     val_seg_sequence)
                     bw_predictions = post_processing(val_output_sequence[:, -1])
@@ -328,6 +345,26 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                     final_val_loss = val_loss.result()
                     final_train_prec = train_metrics[5].result() * 100
                     final_val_prec = train_metrics[5].result() * 100
+                    num_test = data_provider.num_test()
+                    data_provider.enqueue_index()
+#                    model_test = Nets.ULSTMnet2D(net_kernel_params, params.data_format, True, False)
+#                    model_test.set_weights(model.get_weights()) 
+                    for i in range(0, num_test):
+                        image_seq, seg_seq = data_provider.read_new_image()
+                        test_output_sequence, test_predictions, test_loss_value= test_step(image_seq, seg_seq)
+                        log_print(template.format('Testing', int(i),
+                                                  test_loss.result(),
+                                                  test_metrics[4].result() * 100, test_metrics[5].result() * 100, 
+                                                  test_metrics[6].result() * 100))
+                        display_image = image_seq[:, -1]
+                        display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
+                        display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
+                        test_imgs_dict['Image'] = display_image
+                        test_imgs_dict['GT'] = seg_seq[:, -1]
+                        test_imgs_dict['Output'] = test_output_sequence[:, -1]
+                        tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict)
+                        log_print('Printed Testing Step: {} to Tensorboard'.format(i))
+                    
 
         except (KeyboardInterrupt, ValueError, AWSError) as err:
             if not params.dry_run:
@@ -477,7 +514,6 @@ if __name__ == '__main__':
     input_args = arg_parser.parse_args()
     args_dict = {key: val for key, val in vars(input_args).items() if not (val is None)}
     print(args_dict)
-    params = Params.CTCParams(args_dict)
     # params = Params.CTCParamsNoLSTM(args_dict)
 
     # try:
@@ -511,6 +547,7 @@ if __name__ == '__main__':
                                 for _, kern_init in enumerate(dict_param['Kernel init']):
                                     params_value[8] = kern_init
                                     params_value[0] = model_number
+                                    params = Params.CTCParams(args_dict)
                                     train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_value)
                                     with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
                                         reader = csv.reader(csv_file)

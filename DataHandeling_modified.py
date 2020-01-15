@@ -26,7 +26,8 @@ class CTCRAMReaderSequence2D(object):
         self.used_masks_train = []
         self.used_masks_val = []
         np.random.seed(1)
-        self.valid_list_train, self.valid_list_val, self.metadata = self._dataset_split()
+        self.valid_list_train, self.valid_list_val, self.valid_list_test, self.metadata = self._dataset_split()
+        self.q = self.create_queue()
 
 
     @staticmethod
@@ -64,8 +65,9 @@ class CTCRAMReaderSequence2D(object):
             metadata = pickle.load(fobj)
         filename_list = metadata['filelist']
         valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
-        valid_list_train, valid_list_val = train_test_split(valid_masks, test_size= 0.2)
-        return valid_list_train, valid_list_val, metadata
+        valid_list_training, valid_list_test = train_test_split(valid_masks, test_size= 0.2)
+        valid_list_train, valid_list_val = train_test_split(valid_list_training, test_size= 0.2)
+        return valid_list_train, valid_list_val, valid_list_test, metadata
     
     def read_batch(self, flag, kfold, train_index, test_index):
         if len(self.metadata['shape'])== 3:
@@ -187,33 +189,73 @@ class CTCRAMReaderSequence2D(object):
             raise ValueError()
         return image_batch, seg_batch, is_last_batch
 
+    def num_test(self):
+        return int(np.floor(len(self.valid_list_test) / self.batch_size))
 
+    def create_queue(self):
+        q = tf.queue.FIFOQueue(len(self.valid_list_test), dtypes = tf.float32, shapes = ())
+        return q
+        
+    def enqueue_index(self):
+        for i in range(0, len(self.valid_list_test)):
+            self.q.enqueue(self.valid_list_test[i])
+        
+    def read_new_image(self):
+        index = self.q.dequeue_many(self.batch_size)
 
-class CTCInferenceReader(object):
+        image_seq = []
+        seg_seq = []
+        for j in range(0, self.batch_size):
+            img = cv2.imread(os.path.join(self.sequence_folder, 'train', self.metadata['filelist'][index[j]][0]), -1)
+            img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
+            if img is None:
+                raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.metadata['filelist'][index[j]][0])))
+            img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+            if self.metadata['filelist'][index[j]][1] == 'None':
+                seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
+            else:
+                seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.metadata['filelist'][index[j]][1]), -1)
+                seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
+                seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+            
+            image_seq.append(img)
+            seg_seq.append(seg)
+        
+        image_batch = tf.expand_dims(image_seq, 1)
+        seg_batch = tf.expand_dims(seg_seq, 1)
+        image_batch = tf.expand_dims(image_batch, 4)
+        seg_batch = tf.expand_dims(seg_batch, 4)
 
-    def __init__(self, data_path, filename_format='*.tif', normalize=True, pre_sequence_frames=0):
-
-        file_list = glob.glob(os.path.join(data_path, filename_format))
-        if len(file_list) == 0:
-            raise ValueError('Could not read images from: {}'.format(os.path.join(data_path, filename_format)))
-
-        def gen():
-            file_list.sort()
-
-            file_list_pre = file_list[:pre_sequence_frames].copy()
-            file_list_pre.reverse()
-            full_file_list = file_list_pre + file_list
-            for file in full_file_list:
-                img = cv2.imread(file, -1).astype(np.uint16)
-                img = img.astype(np.float32)
-                if img is None:
-                    raise ValueError('Could not read image: {}'.format(file))
-                if normalize:
-                    img = (img - img.mean())
-                    img = img / (img.std())
-                yield img
-
-        self.dataset = tf.data.Dataset.from_generator(gen, tf.float32)
-
-if __name__ == "__main__":
-    CTCInferenceReader.unit_test()
+        return image_batch, seg_batch
+        
+        
+        
+#
+#class CTCInferenceReader(object):
+#
+#    def __init__(self, data_path, filename_format='*.tif', normalize=True, pre_sequence_frames=0):
+#
+#        file_list = glob.glob(os.path.join(data_path, filename_format))
+#        if len(file_list) == 0:
+#            raise ValueError('Could not read images from: {}'.format(os.path.join(data_path, filename_format)))
+#
+#        def gen():
+#            file_list.sort()
+#
+#            file_list_pre = file_list[:pre_sequence_frames].copy()
+#            file_list_pre.reverse()
+#            full_file_list = file_list_pre + file_list
+#            for file in full_file_list:
+#                img = cv2.imread(file, -1).astype(np.uint16)
+#                img = img.astype(np.float32)
+#                if img is None:
+#                    raise ValueError('Could not read image: {}'.format(file))
+#                if normalize:
+#                    img = (img - img.mean())
+#                    img = img / (img.std())
+#                yield img
+#
+#        self.dataset = tf.data.Dataset.from_generator(gen, tf.float32)
+#
+#if __name__ == "__main__":
+#    CTCInferenceReader.unit_test()
