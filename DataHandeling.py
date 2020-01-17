@@ -1,7 +1,6 @@
 import random
 import tensorflow as tf
 import os
-import glob
 import cv2
 import numpy as np
 import pickle
@@ -9,8 +8,8 @@ import scipy
 from sklearn.model_selection import train_test_split
 
 class CTCRAMReaderSequence2D(object):
-    def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, deal_with_end=0, batch_size=4,
-                 queue_capacity=32, num_threads=3, data_format='NCHW', randomize=True, elastic_augmentation=False):
+    def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, batch_size=4,
+                 data_format='NCHW', randomize=True, elastic_augmentation=False):
         if not isinstance(image_crop_size, tuple):
             image_crop_size = tuple(image_crop_size)
         self.unroll_len = unroll_len
@@ -228,34 +227,3 @@ class CTCRAMReaderSequence2D(object):
 
         return image_batch, seg_batch
         
-        
-        
-#
-#class CTCInferenceReader(object):
-#
-#    def __init__(self, data_path, filename_format='*.tif', normalize=True, pre_sequence_frames=0):
-#
-#        file_list = glob.glob(os.path.join(data_path, filename_format))
-#        if len(file_list) == 0:
-#            raise ValueError('Could not read images from: {}'.format(os.path.join(data_path, filename_format)))
-#
-#        def gen():
-#            file_list.sort()
-#
-#            file_list_pre = file_list[:pre_sequence_frames].copy()
-#            file_list_pre.reverse()
-#            full_file_list = file_list_pre + file_list
-#            for file in full_file_list:
-#                img = cv2.imread(file, -1).astype(np.uint16)
-#                img = img.astype(np.float32)
-#                if img is None:
-#                    raise ValueError('Could not read image: {}'.format(file))
-#                if normalize:
-#                    img = (img - img.mean())
-#                    img = img / (img.std())
-#                yield img
-#
-#        self.dataset = tf.data.Dataset.from_generator(gen, tf.float32)
-#
-#if __name__ == "__main__":
-#    CTCInferenceReader.unit_test()

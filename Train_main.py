@@ -18,6 +18,7 @@ from netdict import Net_type
 import csv 
 import matplotlib.pyplot as plt
 from datetime import datetime
+from Pretrained_model import pretraining
 
 
 try:
@@ -89,8 +90,10 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
 
 
         # Model
-        net_kernel_params = Net_type(0, (0, 0), kern_init)['original_net']
+        net_kernel_params = Net_type(0.2, (0, 0), 'random_uniform')['cpu_net']
         model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, False)
+#        model = pretraining(net_kernel_params)
+        
         # Losses and Metrics
         loss_fn = LossFunction()
         train_loss = k.metrics.Mean(name='train_loss')
@@ -379,8 +382,8 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
         finally:
             if not params.dry_run:
                 log_print('Saving Model of inference:')
-                model_fname = os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model.ckpt'.format(int(ckpt.step)))
-                model.save_weights(model_fname, save_format='tf')
+                model_fname = os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model.h5')
+                model.save_weights(model_fname, save_format='h5')
                 with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model_params.pickle'), 'wb') as fobj:
                     pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
                                 fobj, protocol=pickle.HIGHEST_PROTOCOL)
@@ -406,7 +409,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
 if __name__ == '__main__':
 
     class AddNets(argparse.Action):
-        import Networks_our as Nets
+        import Networks as Nets
 
         def __init__(self, option_strings, dest, **kwargs):
             super(AddNets, self).__init__(option_strings, dest, **kwargs)

@@ -2,8 +2,8 @@ import argparse
 import os
 import pickle
 # noinspection PyPackageRequirements
-import Networks_our as Nets
-import Params_our as Params
+import Networks as Nets
+import Params
 import tensorflow as tf
 import DataHandeling
 import sys
@@ -83,8 +83,7 @@ def train(run_folder, hparams, params_value):
     device = '/gpu:0' if params.gpu_id >= 0 else '/cpu:0'
     with tf.device(device):
         # Data input
-        train_data_provider = params.train_data_provider
-        val_data_provider = params.val_data_provider
+        data_provider = params.data_provider
 
         # Model
         net_kernel_params = Net_type(0, (0, 0), hparams[HP_KERNELINIT])['original_net']
@@ -96,6 +95,8 @@ def train(run_folder, hparams, params_value):
         train_metrics = METRICS
         val_loss = k.metrics.Mean(name='val_loss')
         val_metrics = METRICS
+        test_loss = k.metrics.Mean(name = 'test_loss')
+        test_metrics = METRICS
         final_train_loss = 0
         final_val_loss = 0
         final_train_prec = 0
@@ -163,18 +164,32 @@ def train(run_folder, hparams, params_value):
                 metric(label[:, -1], softmax[:, -1])
                 val_metrics[i] = metric
             return softmax, predictions, t_loss
+        
+        @tf.function
+        def test_step(image, label):
+            predictions, softmax = model(image, False)
+            tt_loss, tt_dice_loss, tt_bce_loss = loss_fn.bce_dice_loss(label, softmax)
+#            val_loss(t_loss[:, -1])
+            test_loss(tt_loss)
+            for i, metric in enumerate(test_metrics):
+                metric(label[:, -1], softmax[:, -1])
+                test_metrics[i] = metric
+            return softmax, predictions, tt_loss
 
         #inizialize directories and dictionaries to use on tensorboard
-        train_summary_writer = val_summary_writer = train_scalars_dict = val_scalars_dict = None
+        train_summary_writer = val_summary_writer = test_summary_writer = train_scalars_dict = val_scalars_dict = test_scalars_dict = None
         if not params.dry_run:
             
             train_log_dir = os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'train')
             val_log_dir = os.path.join(params.experiment_log_dir,'NN_'+ str(params_value[0]), 'val')
+            test_log_dir = os.path.join(params.experiment_log_dir,'NN_'+ str(params_value[0]), 'test')
             train_summary_writer = tf.summary.create_file_writer(train_log_dir)
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
+            test_summary_writer = tf.summary.create_file_writer(test_log_dir)
             
             train_scalars_dict = {'Loss': train_loss,'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
             val_scalars_dict = {'Loss': val_loss, 'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
+            test_scalars_dict = {'Loss': test_loss, 'LUT values': test_metrics[0:4], 'Model evaluation': test_metrics[4:7]}
 
         def tboard(writer, log_dir, step, scalar_loss_dict, images_dict):
             with tf.device('/cpu:0'):
@@ -205,8 +220,8 @@ def train(run_folder, hparams, params_value):
                         
         def post_processing(images):
             images_shape = images.shape
-            im_reshaped = np.reshape(images, (images_shape[0]*images_shape[1], images_shape[2], images_shape[3]))
-            bw_predictions = np.zeros((im_reshaped.shape[0], im_reshaped.shape[1], im_reshaped.shape[2])).astype(np.float32)
+            im_reshaped = np.reshape(images, (images.shape[0], images.shape[1], images.shape[2]))
+            bw_predictions = np.zeros((images.shape[0], images.shape[1], images.shape[2])).astype(np.float32)
             for i in range(0, images.shape[0]):
                 ret, bw_predictions[i] = cv2.threshold(im_reshaped[i],0.8, 1 ,cv2.THRESH_BINARY)
             bw_predictions = np.reshape(bw_predictions, images_shape)
@@ -218,19 +233,20 @@ def train(run_folder, hparams, params_value):
             val_states = model.get_states()
             train_imgs_dict = {}
             val_imgs_dict = {}
+            test_imgs_dict = {}
             for _ in range(int(ckpt.step), params.num_iterations + 1):
                 if params.aws:
                     r = requests.get('http://169.254.169.254/latest/meta-data/spot/instance-action')
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, is_last_batch = train_data_provider.read_batch('train')
+                image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train')
                 
                 if params.profile:
                         tf.summary.trace_on(graph=True, profiler=True)
                 
                 train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
-                bw_predictions = post_processing(train_output_sequence)
+                bw_predictions = post_processing(train_output_sequence[:, -1])
 
                 if params.profile:
                     with train_summary_writer.as_default():
@@ -247,7 +263,7 @@ def train(run_folder, hparams, params_value):
                         train_imgs_dict['Image'] = display_image
                         train_imgs_dict['GT'] = seg_sequence[:, -1]
                         train_imgs_dict['Output'] = train_output_sequence[:, -1]
-                        train_imgs_dict['Output_bw'] = bw_predictions[:, -1]
+                        train_imgs_dict['Output_bw'] = bw_predictions
                         tboard(train_summary_writer, train_log_dir, int(ckpt.step), train_scalars_dict, train_imgs_dict)
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -268,10 +284,10 @@ def train(run_folder, hparams, params_value):
                 if not int(ckpt.step) % params.validation_interval:
                     train_states = model.get_states()
                     model.set_states(val_states)
-                    (val_image_sequence, val_seg_sequence, val_is_last_batch) = val_data_provider.read_batch('val')
+                    (val_image_sequence, val_seg_sequence, val_is_last_batch) = data_provider.read_batch('val')
                     val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
                                                                                     val_seg_sequence)
-                    bw_predictions = post_processing(val_output_sequence)
+                    bw_predictions = post_processing(val_output_sequence[:, -1])
                     model.reset_states_per_batch(val_is_last_batch)  # reset states for sequences that ended
                     #calling the function that writes the dictionaries on tensorboard
                     if not params.dry_run:
@@ -281,7 +297,7 @@ def train(run_folder, hparams, params_value):
                         val_imgs_dict['Image'] = display_image
                         val_imgs_dict['GT'] = val_seg_sequence[:, -1]
                         val_imgs_dict['Output'] = val_output_sequence[:, -1]
-                        val_imgs_dict['Output_bw'] = bw_predictions[:, -1]
+                        val_imgs_dict['Output_bw'] = bw_predictions
                         tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict)
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -302,7 +318,27 @@ def train(run_folder, hparams, params_value):
                         hp.hparams(hparams)  # record the values used in this trial
                         precision = train_metrics[5].result()
                         tf.summary.scalar(METRIC_ACCURACY, precision, step=ckpt.step)
-
+                    num_test = data_provider.num_test()
+                    data_provider.enqueue_index()
+#                    model_test = Nets.ULSTMnet2D(net_kernel_params, params.data_format, True, False)
+#                    model_test.set_weights(model.get_weights()) 
+                    for i in range(0, num_test):
+                        image_seq, seg_seq = data_provider.read_new_image()
+                        test_output_sequence, test_predictions, test_loss_value= test_step(image_seq, seg_seq)
+                        bw_predictions = post_processing(test_output_sequence[:, -1])
+                        log_print(template.format('Testing', int(i),
+                                                  test_loss.result(),
+                                                  test_metrics[4].result() * 100, test_metrics[5].result() * 100, 
+                                                  test_metrics[6].result() * 100))
+                        display_image = image_seq[:, -1]
+                        display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
+                        display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
+                        test_imgs_dict['Image'] = display_image
+                        test_imgs_dict['GT'] = seg_seq[:, -1]
+                        test_imgs_dict['Output'] = test_output_sequence[:, -1]
+                        test_imgs_dict['Output_bw'] = bw_predictions
+                        tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict)
+                        log_print('Printed Testing Step: {} to Tensorboard'.format(i))
 
         except (KeyboardInterrupt, ValueError, AWSError) as err:
             if not params.dry_run:

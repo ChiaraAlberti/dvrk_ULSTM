@@ -3,10 +3,10 @@
 import argparse
 import os
 import pickle
-import Networks_our as Nets
-import Params_our as Params
+import Networks as Nets
+import Params
 import tensorflow as tf
-from data_generator import DataGenerator
+from Data_generator import DataSet
 import sys
 from utils import log_print
 import cv2
@@ -18,13 +18,14 @@ from netdict import Net_type
 import csv 
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+import keras as k
 
-try:
-    # noinspection PyPackageRequirements
-    import tensorflow.python.keras as k
-except AttributeError:
-    # noinspection PyPackageRequirements,PyUnresolvedReferences
-    import tensorflow.keras as k
+#try:
+#    # noinspection PyPackageRequirements
+#    import tensorflow.python.keras as k
+#except AttributeError:
+#    # noinspection PyPackageRequirements,PyUnresolvedReferences
+#    import tensorflow.keras as k
 
 METRICS = [
       k.metrics.TruePositives(name='tp'),
@@ -77,7 +78,7 @@ class LossFunction:
 #        loss = loss * valid
 #        loss = tf.reduce_sum(loss) / (tf.reduce_sum(valid) + 0.00001)
         return loss, dice_loss, bce_loss
-
+    
 
 def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_type, params_value):
    
@@ -87,6 +88,7 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
         # Model
         net_kernel_params = Net_type(dropout, (l1, l2), kern_init)['original_net']
         model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, False)
+
         # Losses and Metrics
         loss_fn = LossFunction()
         final_train_loss = 0
@@ -106,12 +108,12 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
         
         # Save Checkpoints
 
-        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        lr_schedule = tf.optimizers.schedules.ExponentialDecay(
                 initial_learning_rate = lr, 
                 decay_steps=100000,
                 decay_rate=lr_decay, 
                 staircase=True)
-        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+        optimizer = k.optimizers.Adam(learning_rate=lr_schedule)
         
         cp = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(params.experiment_save_dir, 'NN_' + str(params_value[0]), 'tf_ckpts'),
                                         monitor='val_loss',
@@ -158,12 +160,15 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
             valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
             valid_list_train, valid_list_val = train_test_split(valid_masks, test_size= 0.2)
             partition = {'train': valid_list_train, 'validation': valid_list_val}
-            training_generator = DataGenerator(partition['train'], filename_list, **parameter)
-            validation_generator = DataGenerator(partition['validation'], filename_list, **parameter)
+            data_training = DataSet(partition['train'], filename_list, sequence_folder, **parameter)
+            data_validation = DataSet(partition['validation'], filename_list, sequence_folder, **parameter)
+            train_generator = data_training.frame_generator()
+            val_generator = data_validation.frame_generator()
+            steps = int(np.floor(len(partition['train'])/params.batch_size))
+            val_steps = int(np.floor(len(partition['validation'])/params.batch_size))
             model.compile(optimizer=optimizer, loss=loss_fn, metrics= METRICS)
-            history = model.fit_generator(generator=training_generator,
-                                          verbose=1, callbacks=[tb, cp], validation_data=validation_generator, 
-                                          use_multiprocessing=True, workers=6)
+            history = model.fit(x=train_generator,verbose=1, callbacks=[tb, cp], validation_data=val_generator, 
+                                          steps_per_epoch=steps, validation_steps = val_steps, epochs= 200)
 #                show_dataset_labels(image_sequence, seg_sequence)
             
             
@@ -179,23 +184,23 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
             if not params.dry_run:
                 log_print('Saving Model of inference:')
                 model_fname = os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model')
-                model.save_weights(model_fname, save_format='tf')
-                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model_params.pickle'), 'wb') as fobj:
-                    pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
-                                fobj, protocol=pickle.HIGHEST_PROTOCOL)
-                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv'), 'w') as fobj:
-                    writer = csv.writer(fobj)
-                    model_dict = {'Model': []}
-                    model_dict.update(model_dict.fromkeys(dict_param.keys(),[]))
-                    for i, key in enumerate(model_dict.items()):
-                        model_dict[key[0]] = params_value[i]
-                    model_dict.update({'Train_loss': final_train_loss, 'Train_precision': final_train_prec,
-                                      'Val_loss': final_val_loss, 'Val_precision': final_val_prec})
-                    for key, value in model_dict.items():
-                       writer.writerow([key, value])
-                log_print('Saved Model to file: {}'.format(model_fname))
-                end_time = time.time()
-                log_print('Program execution time:', end_time - start_time)                
+#                model.save_weights(model_fname, save_format='tf')
+#                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model_params.pickle'), 'wb') as fobj:
+#                    pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
+#                                fobj, protocol=pickle.HIGHEST_PROTOCOL)
+#                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv'), 'w') as fobj:
+#                    writer = csv.writer(fobj)
+#                    model_dict = {'Model': []}
+#                    model_dict.update(model_dict.fromkeys(dict_param.keys(),[]))
+#                    for i, key in enumerate(model_dict.items()):
+#                        model_dict[key[0]] = params_value[i]
+#                    model_dict.update({'Train_loss': final_train_loss, 'Train_precision': final_train_prec,
+#                                      'Val_loss': final_val_loss, 'Val_precision': final_val_prec})
+#                    for key, value in model_dict.items():
+#                       writer.writerow([key, value])
+#                log_print('Saved Model to file: {}'.format(model_fname))
+#                end_time = time.time()
+#                log_print('Program execution time:', end_time - start_time)                
             else:
                 log_print('WARNING: dry_run flag is ON! Not Saving Model')
             log_print('Closing gracefully')
@@ -205,7 +210,7 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
 if __name__ == '__main__':
 
     class AddNets(argparse.Action):
-        import Networks_our as Nets
+        import Networks as Nets
 
         def __init__(self, option_strings, dest, **kwargs):
             super(AddNets, self).__init__(option_strings, dest, **kwargs)
@@ -221,7 +226,7 @@ if __name__ == '__main__':
             super(AddReader, self).__init__(option_strings, dest, **kwargs)
 
         def __call__(self, parser, namespace, values, option_string=None):
-            reader = getattr(DataHandeling, values)
+            reader = getattr(DataGenerator, values)
             setattr(namespace, self.dest, reader)
 
 
