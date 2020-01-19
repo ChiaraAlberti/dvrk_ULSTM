@@ -1,0 +1,4 @@
+Dropout,Drop_input,L1,L2
+0,TRUE,0,0
+0.2,FALSE,0.01,0.01
+0.5,,,

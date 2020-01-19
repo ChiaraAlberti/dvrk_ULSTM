@@ -30,13 +30,13 @@ class CTCParams(ParamsBase):
     root_data_dir = ROOT_DATA_DIR
     crop_size = (64, 64)  # (height, width) preferably height=width 
     reshape_size = (64, 64)
-    batch_size = 10
-    unroll_len = 6
+    batch_size = 5
+    unroll_len = 5
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
 
 
     # -------- Training ----------
-    num_iterations = 50
+    num_iterations = 15000
     validation_interval = 10
     print_to_console_interval = 10
 
@@ -51,7 +51,7 @@ class CTCParams(ParamsBase):
 
     # ---------Tensorboard-------------
     tb_sub_folder = 'LSTMUNet'
-    write_to_tb_interval = 10
+    write_to_tb_interval = 100
     save_log_dir = ROOT_SAVE_DIR
 
     # ---------Debugging-------------
@@ -78,7 +78,8 @@ class CTCParams(ParamsBase):
                                                             )
 
 
-        now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+#        now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+        now_string = 'HP_tuning_regularization'
         if self.load_checkpoint and self.continue_run:
             if os.path.isdir(self.load_checkpoint_path):
                 if self.load_checkpoint_path.endswith('tf-ckpt') or self.load_checkpoint_path.endswith('tf-ckpt/'):

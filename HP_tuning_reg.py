@@ -86,9 +86,9 @@ def train(run_folder, hparams, params_value):
         data_provider = params.data_provider
 
         # Model
-        net_kernel_params = Net_type(0, (0, 0), hparams[HP_KERNELINIT])['original_net']
+        net_kernel_params = Net_type(hparams[HP_DROPOUT], (hparams[HP_L1], hparams[HP_L2]),'he_normal')['original_net']
         # net_kernel_params = Net_type(dropout, (l1, l2), kern_init)['longLSTM_net']
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, False)
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, hparams[HP_DROPINPUT])
         # Losses and Metrics
         loss_fn = LossFunction()
         train_loss = k.metrics.Mean(name='train_loss')
@@ -105,9 +105,9 @@ def train(run_folder, hparams, params_value):
         # Save Checkpoints
 
         lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate = hparams[HP_LEARNINGRATE], 
+                initial_learning_rate = 0.0001, 
                 decay_steps=100000,
-                decay_rate=hparams[HP_LEARNINGRATEDECAY], 
+                decay_rate= 0.96, 
                 staircase=True)
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
@@ -144,11 +144,12 @@ def train(run_folder, hparams, params_value):
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             ckpt.step.assign_add(1)
             train_loss(loss)
+            segmentation = tf.cast(tf.greater(softmax, 0.5), tf.float32)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(train_metrics):
-                metric(label[:, -1], softmax[:, -1])
+                metric(label[:, -1], segmentation[:, -1])
                 train_metrics[i] = metric
             return softmax, predictions, loss
 
@@ -157,11 +158,12 @@ def train(run_folder, hparams, params_value):
             predictions, softmax = model(image, False)
             t_loss, t_dice_loss, t_bce_loss = loss_fn.bce_dice_loss(label, softmax)
             val_loss(t_loss)
+            segmentation = tf.cast(tf.greater(softmax, 0.5), tf.float32)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(val_metrics):
-                metric(label[:, -1], softmax[:, -1])
+                metric(label[:, -1], segmentation[:, -1])
                 val_metrics[i] = metric
             return softmax, predictions, t_loss
         
@@ -171,8 +173,9 @@ def train(run_folder, hparams, params_value):
             tt_loss, tt_dice_loss, tt_bce_loss = loss_fn.bce_dice_loss(label, softmax)
 #            val_loss(t_loss[:, -1])
             test_loss(tt_loss)
+            segmentation = tf.cast(tf.greater(softmax, 0.5), tf.float32)
             for i, metric in enumerate(test_metrics):
-                metric(label[:, -1], softmax[:, -1])
+                metric(label[:, -1], segmentation[:, -1])
                 test_metrics[i] = metric
             return softmax, predictions, tt_loss
 
@@ -217,7 +220,7 @@ def train(run_folder, hparams, params_value):
                         if params.channel_axis == 1:
                             image = tf.transpose(image, (0, 2, 3, 1))
                         tf.summary.image(image_name, image, max_outputs=1, step=step)
-                        
+               
         def post_processing(images):
             images_shape = images.shape
             im_reshaped = np.reshape(images, (images.shape[0], images.shape[1], images.shape[2]))
@@ -314,10 +317,6 @@ def train(run_folder, hparams, params_value):
                     final_val_loss = val_loss.result().numpy()
                     final_train_prec = train_metrics[5].result().numpy() * 100
                     final_val_prec = train_metrics[5].result().numpy() * 100
-                    with tf.summary.create_file_writer(run_folder).as_default():
-                        hp.hparams(hparams)  # record the values used in this trial
-                        precision = train_metrics[5].result()
-                        tf.summary.scalar(METRIC_ACCURACY, precision, step=ckpt.step)
                     num_test = data_provider.num_test()
                     data_provider.enqueue_index()
 #                    model_test = Nets.ULSTMnet2D(net_kernel_params, params.data_format, True, False)
@@ -339,6 +338,21 @@ def train(run_folder, hparams, params_value):
                         test_imgs_dict['Output_bw'] = bw_predictions
                         tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict)
                         log_print('Printed Testing Step: {} to Tensorboard'.format(i))
+                        
+                    with tf.summary.create_file_writer(run_folder).as_default():
+                        hp.hparams(hparams)  # record the values used in this trial
+                        precision_train = train_metrics[5].result()
+                        loss_train = train_loss.result()
+                        precision_val = val_metrics[5].result()
+                        loss_val = val_loss.result()
+                        precision_test = test_metrics[5].result()
+                        loss_test = test_loss.result()
+                        tf.summary.scalar(METRIC_PRECISION_TRAIN, precision_train, step=ckpt.step)
+                        tf.summary.scalar(METRIC_LOSS_TRAIN, loss_train, step=ckpt.step)
+                        tf.summary.scalar(METRIC_PRECISION_VAL, precision_val, step=ckpt.step)
+                        tf.summary.scalar(METRIC_LOSS_VAL, loss_val, step=ckpt.step)
+                        tf.summary.scalar(METRIC_PRECISION_TEST, precision_test, step=ckpt.step)
+                        tf.summary.scalar(METRIC_LOSS_TEST, loss_test, step=ckpt.step)
 
         except (KeyboardInterrupt, ValueError, AWSError) as err:
             if not params.dry_run:
@@ -498,58 +512,66 @@ if __name__ == '__main__':
     #     log_print('Done')
     
 
-    df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list.csv')
+    df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list_reg.csv')
     df.fillna(4,inplace=True)
     dict_param = df.to_dict(orient='list')
     dict_param = {k:[elem for elem in v if elem !=4] for k,v in dict_param.items()}
     complete_dict = []
-    params_value = [None]*4
+    params_value = [None]*5
     model_number = 0
     
-#    HP_DROPOUT = hp.HParam('dropout', hp.Discrete(dict_param['Dropout']))
-#    HP_DROPINPUT = hp.HParam('drop input', hp.Discrete(dict_param['Drop_input']))
-    HP_LEARNINGRATE = hp.HParam('lr', hp.Discrete(dict_param['Learning rate']))
-    HP_LEARNINGRATEDECAY = hp.HParam('lr_decay', hp.Discrete(dict_param['Learning rate decay']))
-#    HP_L1 = hp.HParam('l1', hp.Discrete(dict_param['L1']))
-#    HP_L2 = hp.HParam('l2', hp.Discrete(dict_param['L2']))
-#    HP_TYPENN = hp.HParam('NN_type', hp.Discrete(dict_param['Type of NN']))
-    HP_KERNELINIT = hp.HParam('Kern_init', hp.Discrete(dict_param['Kernel init']))
-    METRIC_ACCURACY = 'precision'
+    HP_DROPOUT = hp.HParam('dropout', hp.Discrete(dict_param['Dropout']))
+    HP_DROPINPUT = hp.HParam('drop input', hp.Discrete(dict_param['Drop_input']))
+    HP_L1 = hp.HParam('l1', hp.Discrete(dict_param['L1']))
+    HP_L2 = hp.HParam('l2', hp.Discrete(dict_param['L2']))
+    METRIC_PRECISION_TRAIN = 'precision_train'
+    METRIC_LOSS_TRAIN = 'loss_train'
+    METRIC_PRECISION_VAL = 'precision_val'
+    METRIC_LOSS_VAL = 'loss_val'
+    METRIC_PRECISION_TEST = 'precision_test'
+    METRIC_LOSS_TEST = 'loss_test'
 
   
 
-    for lr in HP_LEARNINGRATE.domain.values:
-        params_value[1] = lr
-        for lr_decay in HP_LEARNINGRATEDECAY.domain.values:
-            params_value[2] = lr_decay
-            for kern_init in HP_KERNELINIT.domain.values:
-                params_value[3] = kern_init
-                params_value[0] = model_number
-                params = Params.CTCParams(args_dict)
-                with tf.summary.create_file_writer(os.path.join(params.experiment_log_dir, 'hparam_tuning')).as_default():
-                    hp.hparams_config(
-                      hparams=[HP_LEARNINGRATE, HP_LEARNINGRATEDECAY, HP_KERNELINIT],
-                      metrics=[hp.Metric(METRIC_ACCURACY, display_name='precision')],
-                    )
-                hparams = {
-                    HP_LEARNINGRATE: lr,
-                    HP_LEARNINGRATEDECAY: lr_decay,
-                    HP_KERNELINIT: kern_init,
-                }
-                run_name = "run-%d" % model_number
-                print('--- Starting trial: %s' % run_name)
-                print({h.name: hparams[h] for h in hparams})
-                params = Params.CTCParams(args_dict)
-                train(os.path.join(params.experiment_log_dir, 'hparam_tuning/') + run_name, hparams, params_value)
-                model_number += 1
-                
-                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
-                    reader = csv.reader(csv_file)
-                    model_dict = dict(reader)
-                    complete_dict.append(model_dict)
-                with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
-                    writer = csv.DictWriter(f, complete_dict[0].keys())
-                    writer.writeheader()
-                    writer.writerows(complete_dict)
+    for dropout in HP_DROPOUT.domain.values:
+        params_value[1] = dropout
+        for drop_input in HP_DROPINPUT.domain.values:
+            params_value[2] = drop_input
+            for l1 in HP_L1.domain.values:
+                params_value[3] = l1
+                for l2 in HP_L2.domain.values:
+                    params_value[4] = l2
+                    params_value[0] = model_number
+                    params = Params.CTCParams(args_dict)
+                    with tf.summary.create_file_writer(os.path.join(params.experiment_log_dir, 'hparam_tuning')).as_default():
+                        hp.hparams_config(
+                          hparams=[HP_DROPOUT, HP_DROPINPUT, HP_L1, HP_L2],
+                          metrics=[hp.Metric(METRIC_PRECISION_TRAIN, display_name='precision_train'), 
+                                   hp.Metric(METRIC_LOSS_TRAIN, display_name='loss_train'), 
+                                   hp.Metric(METRIC_PRECISION_VAL, display_name='precision_val'),
+                                   hp.Metric(METRIC_LOSS_VAL, display_name='loss_val'),
+                                   hp.Metric(METRIC_PRECISION_TEST, display_name='precision_test'),
+                                   hp.Metric(METRIC_LOSS_TEST, display_name='loss_test')]
+                          )
+                    hparams = {
+                        HP_DROPOUT: dropout,
+                        HP_DROPINPUT: drop_input,
+                        HP_L1: l1,
+                        HP_L2: l2,
+                    }
+                    run_name = "run-%d" % model_number
+                    print('--- Starting trial: %s' % run_name)
+                    print({h.name: hparams[h] for h in hparams})
+                    train(os.path.join(params.experiment_log_dir, 'hparam_tuning/') + run_name, hparams, params_value)
+                    model_number += 1
+                    
+                    with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
+                        reader = csv.reader(csv_file)
+                        model_dict = dict(reader)
+                        complete_dict.append(model_dict)
+                    with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
+                        writer = csv.DictWriter(f, complete_dict[0].keys())
+                        writer.writeheader()
+                        writer.writerows(complete_dict)
 
 
