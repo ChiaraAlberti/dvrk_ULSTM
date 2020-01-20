@@ -191,7 +191,7 @@ def train(run_folder, hparams, params_value):
             test_summary_writer = tf.summary.create_file_writer(test_log_dir)
             
             train_scalars_dict = {'Loss': train_loss,'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
-            val_scalars_dict = {'Loss': val_loss, 'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
+            val_scalars_dict = {'Loss': val_loss, 'LUT values': val_metrics[0:4], 'Model evaluation': val_metrics[4:7]}
             test_scalars_dict = {'Loss': test_loss, 'LUT values': test_metrics[0:4], 'Model evaluation': test_metrics[4:7]}
 
         def tboard(writer, log_dir, step, scalar_loss_dict, images_dict):
@@ -316,7 +316,7 @@ def train(run_folder, hparams, params_value):
                     final_train_loss = train_loss.result().numpy()
                     final_val_loss = val_loss.result().numpy()
                     final_train_prec = train_metrics[5].result().numpy() * 100
-                    final_val_prec = train_metrics[5].result().numpy() * 100
+                    final_val_prec = val_metrics[5].result().numpy() * 100
                     num_test = data_provider.num_test()
                     data_provider.enqueue_index()
 #                    model_test = Nets.ULSTMnet2D(net_kernel_params, params.data_format, True, False)

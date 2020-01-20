@@ -2,7 +2,7 @@ import argparse
 import os
 import pickle
 # noinspection PyPackageRequirements
-import Networks as Nets
+import Pretrained_Networks as Nets
 import Params
 import tensorflow as tf
 import DataHandeling 
@@ -18,7 +18,7 @@ from netdict import Net_type
 import csv 
 import matplotlib.pyplot as plt
 from datetime import datetime
-from Pretrained_model import pretraining
+#from Pretrained_model import pretraining
 
 
 try:
@@ -81,7 +81,7 @@ class LossFunction:
         return loss, dice_loss, bce_loss
 
 
-def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_value):
+def train():
    
     device = '/gpu:0' if params.gpu_id >= 0 else '/cpu:0'
     with tf.device(device):
@@ -114,7 +114,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
         lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
                 initial_learning_rate = 0.0005, 
                 decay_steps=100000,
-                decay_rate=lr_decay, 
+                decay_rate=0.96, 
                 staircase=True)
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
@@ -137,7 +137,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
         else:
             log_print("Initializing from scratch.")
 
-        manager = tf.train.CheckpointManager(ckpt, os.path.join(params.experiment_save_dir, 'NN_' + str(params_value[0]), 'tf_ckpts'),
+        manager = tf.train.CheckpointManager(ckpt, os.path.join(params.experiment_save_dir, 'tf_ckpts'),
                                              max_to_keep=params.save_checkpoint_max_to_keep,
                                              keep_checkpoint_every_n_hours=params.save_checkpoint_every_N_hours)
 
@@ -189,9 +189,9 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
         #inizialize directories and dictionaries to use on tensorboard
         train_summary_writer = val_summary_writer = test_summary_writer = train_scalars_dict = val_scalars_dict  = test_scalars_dict = None
         if not params.dry_run:         
-            train_log_dir = os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'train')
-            val_log_dir = os.path.join(params.experiment_log_dir,'NN_'+ str(params_value[0]), 'val')
-            test_log_dir = os.path.join(params.experiment_log_dir,'NN_'+ str(params_value[0]), 'test')
+            train_log_dir = os.path.join(params.experiment_log_dir,  'train')
+            val_log_dir = os.path.join(params.experiment_log_dir, 'val')
+            test_log_dir = os.path.join(params.experiment_log_dir, 'test')
             train_summary_writer = tf.summary.create_file_writer(train_log_dir)
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
             test_summary_writer = tf.summary.create_file_writer(test_log_dir)
@@ -273,7 +273,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
                     train_metrics[i].reset_states()
                 
                 if params.profile:
-                    graph_dir = os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
+                    graph_dir = os.path.join(params.experiment_log_dir, 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
                     tf.summary.trace_on(graph=True, profiler=True)
                     graph_summary_writer = tf.summary.create_file_writer(graph_dir)
                 
@@ -382,17 +382,14 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
         finally:
             if not params.dry_run:
                 log_print('Saving Model of inference:')
-                model_fname = os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model.h5')
-                model.save_weights(model_fname, save_format='h5')
-                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model_params.pickle'), 'wb') as fobj:
+                model_fname = os.path.join(params.experiment_save_dir, 'model.ckpt')
+                model.save_weights(model_fname, save_format='tf')
+                with open(os.path.join(params.experiment_save_dir, 'model_params.pickle'), 'wb') as fobj:
                     pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
                                 fobj, protocol=pickle.HIGHEST_PROTOCOL)
-                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv'), 'w') as fobj:
+                with open(os.path.join(params.experiment_save_dir, 'params_list.csv'), 'w') as fobj:
                     writer = csv.writer(fobj)
-                    model_dict = {'Model': []}
-                    model_dict.update(model_dict.fromkeys(dict_param.keys(),[]))
-                    for i, key in enumerate(model_dict.items()):
-                        model_dict[key[0]] = params_value[i]
+                    model_dict = {}
                     model_dict.update({'Train_loss': final_train_loss, 'Train_precision': final_train_prec,
                                       'Val_loss': final_val_loss, 'Val_precision': final_val_prec})
                     for key, value in model_dict.items():
@@ -409,7 +406,7 @@ def train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_
 if __name__ == '__main__':
 
     class AddNets(argparse.Action):
-        import Networks as Nets
+        import Pretrained_Networks as Nets
 
         def __init__(self, option_strings, dest, **kwargs):
             super(AddNets, self).__init__(option_strings, dest, **kwargs)
@@ -524,45 +521,5 @@ if __name__ == '__main__':
     # finally:
     #     log_print('Done')
     
-
-    df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list_full.csv')
-    df.fillna(4,inplace=True)
-    dict_param = df.to_dict(orient='list')
-    dict_param = {k:[elem for elem in v if elem !=4] for k,v in dict_param.items()}
-    complete_dict = []
-    params_value = [None]*10
-    model_number = 0
-    
-    for _, dropout in enumerate(dict_param['Dropout']):
-        params_value[1] = dropout
-        for _, drop_input in enumerate(dict_param['Drop_input']):
-            params_value[2] = drop_input
-            for _, lr in enumerate(dict_param['Learning rate']):
-                params_value[3] = lr
-                for _, lr_decay in enumerate(dict_param['Learning rate decay']):
-                    params_value[4] = lr_decay
-                    for _, l1 in enumerate(dict_param['L1']):
-                        params_value[5] = l1
-                        for _, l2 in enumerate(dict_param['L2']):
-                            params_value[6] = l2
-                            for _, NN_type in enumerate(dict_param['Type of NN']):
-                                params_value[7] = NN_type
-                                for _, kern_init in enumerate(dict_param['Kernel init']):
-                                    params_value[8] = kern_init
-                                    params_value[0] = model_number
-                                    params = Params.CTCParams(args_dict)
-                                    train(dropout, drop_input, lr, kern_init, l1, l2, lr_decay, NN_type, params_value)
-                                    with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
-                                        reader = csv.reader(csv_file)
-                                        model_dict = dict(reader)
-                                        complete_dict.append(model_dict)
-                                    model_number += 1
-                                    with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
-                                        writer = csv.DictWriter(f, complete_dict[0].keys())
-                                        writer.writeheader()
-                                        writer.writerows(complete_dict)
-
-with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
-    writer = csv.DictWriter(f, complete_dict[0].keys())
-    writer.writeheader()
-    writer.writerows(complete_dict)
+    params = Params.CTCParams(args_dict)
+    train()

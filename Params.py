@@ -78,8 +78,8 @@ class CTCParams(ParamsBase):
                                                             )
 
 
-#        now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-        now_string = 'HP_tuning_regularization'
+        now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+#        now_string = 'HP_tuning_regularization'
         if self.load_checkpoint and self.continue_run:
             if os.path.isdir(self.load_checkpoint_path):
                 if self.load_checkpoint_path.endswith('tf-ckpt') or self.load_checkpoint_path.endswith('tf-ckpt/'):

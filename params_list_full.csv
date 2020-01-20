@@ -1,5 +1,0 @@
-Dropout,Drop_input,Learning rate,Learning rate decay,L1,L2,Type of NN,Kernel init,Crop
-0,TRUE,0.001,0.98,0,0,deeper_net,random_uniform,50
-0.2,FALSE,0.0001,0.9,0.01,0.01,original_net,glorot_uniform,40
-0.5,,,,,,shorter_net,,
-,,,,,,longLSTM_net,,
