@@ -1,17 +1,11 @@
+#data_generator that creates batches of "Sequence" type
+
 import numpy as np
 import random
 import cv2
 import os
 import scipy
-
 from tensorflow.python.keras.utils.data_utils import Sequence
-
-#try:
-#    # noinspection PyPackageRequirements
-#    import tensorflow.python.keras as k
-#except AttributeError:
-#    # noinspection PyPackageRequirements,PyUnresolvedReferences
-#    import tensorflow.keras as k
 
 class DataGenerator(Sequence):
     'Generates data for Keras'
@@ -33,11 +27,12 @@ class DataGenerator(Sequence):
         self.on_epoch_end()
         np.random.seed(1)
 
+    #num iterations of each epoch
     def __len__(self):
         return int(np.floor(len(self.list_IDs) / self.batch_size))
 
+    #creates batch of images
     def __getitem__(self, index):
-        'Generate one batch of data'
         # Generate indexes of the batch
         indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
         list_IDs_temp = [self.list_IDs[k] for k in indexes]
@@ -47,8 +42,8 @@ class DataGenerator(Sequence):
         print('Seg', all_seg.shape)
         return all_images, all_seg
 
+    #Updates indexes after each epoch if shuffle is True
     def on_epoch_end(self):
-        'Updates indexes after each epoch'
         self.indexes = np.arange(len(self.list_IDs))
         if self.shuffle == True:
             np.random.shuffle(self.indexes)
@@ -63,10 +58,9 @@ class DataGenerator(Sequence):
         img_mean = image.mean()
         out_img = (image - img_mean) * factor + img_mean
         return out_img
-
+    
+    #Generates data containing batch_size*unroll_length samples and perform data_augmentation
     def __data_generation(self, list_IDs_temp):
-        'Generates data containing batch_size samples' # X : (n_samples, *dim, n_channels)
-        # Initialization
         image_batch = np.zeros((self.batch_size, self.unroll_len, *self.reshape_size, 1))
         seg_batch = np.zeros((self.batch_size, self.unroll_len, *self.reshape_size, 1))
 

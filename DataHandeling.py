@@ -25,7 +25,9 @@ class CTCRAMReaderSequence2D(object):
         self.used_masks_train = []
         self.used_masks_val = []
         np.random.seed(1)
+        #initialization of the different parts of dataset
         self.valid_list_train, self.valid_list_val, self.valid_list_test, self.metadata = self._dataset_split()
+        #create a queue for the testing
         self.q = self.create_queue()
 
 
@@ -40,6 +42,7 @@ class CTCRAMReaderSequence2D(object):
         out_img = (image - img_mean) * factor + img_mean
         return out_img
     
+    
     def split_k_fold(self, kf):
         sequence_folder = self.sequence_folder
         with open(os.path.join(sequence_folder, 'full_csv_prova.pkl'), 'rb') as fobj:
@@ -49,7 +52,7 @@ class CTCRAMReaderSequence2D(object):
         valid_list_train, valid_list_val = kf.split(valid_masks)
         return valid_list_train, valid_list_val
         
-    
+    #calculate the number of iterations for each epoch
     def get_steps(self):
         sequence_folder = self.sequence_folder
         with open(os.path.join(sequence_folder, 'full_csv_prova.pkl'), 'rb') as fobj:
@@ -58,6 +61,7 @@ class CTCRAMReaderSequence2D(object):
         valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
         return len(valid_masks)
     
+    #splits the index of the labeled masks onto different sets for training, validation and test
     def _dataset_split(self):
         sequence_folder = self.sequence_folder
         with open(os.path.join(sequence_folder, 'full_csv_prova.pkl'), 'rb') as fobj:
@@ -68,6 +72,7 @@ class CTCRAMReaderSequence2D(object):
         valid_list_train, valid_list_val = train_test_split(valid_list_training, test_size= 0.2)
         return valid_list_train, valid_list_val, valid_list_test, metadata
     
+    #create the batch of images and apply data augmentation
     def read_batch(self, flag, kfold, train_index, test_index):
         if len(self.metadata['shape'])== 3:
             img_size = self.reshape_size + (self.metadata['shape'][-1],)
@@ -188,17 +193,20 @@ class CTCRAMReaderSequence2D(object):
             raise ValueError()
         return image_batch, seg_batch, is_last_batch
 
+    #calculate the number of tests iterations
     def num_test(self):
         return int(np.floor(len(self.valid_list_test) / self.batch_size))
 
     def create_queue(self):
         q = tf.queue.FIFOQueue(len(self.valid_list_test), dtypes = tf.float32, shapes = ())
         return q
-        
+    
+    #enqueue the index of the test sets    
     def enqueue_index(self):
         for i in range(0, len(self.valid_list_test)):
             self.q.enqueue(self.valid_list_test[i])
-        
+    
+    #read the images in order to test     
     def read_new_image(self):
         index = self.q.dequeue_many(self.batch_size)
 

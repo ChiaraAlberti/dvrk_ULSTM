@@ -3,26 +3,29 @@ import random
 import os.path
 import cv2
 import scipy
+import threading
+import functools
+
+##data generator that uses threads in order to create continuosly a batch of images with shape(batch_size, unirll_length, reshape_size)
 
 
+class threadsafe_iterator(object):
+    def __init__(self, iterator):
+        self.iterator = iterator
+        self.lock = threading.Lock()
 
-#class threadsafe_iterator(object):
-#    def __init__(self, iterator):
-#        self.iterator = iterator
-#        self.lock = threading.Lock()
-#
-#    def __iter__(self):
-#        return self
-#
-#    def __next__(self):
-#        with self.lock:
-#            return next(self.iterator)
-#
-#def threadsafe_generator(func):
-#    @functools.wraps(func)
-#    def gen(*a, **kw):
-#        return threadsafe_iterator(func(*a, **kw))
-#    return gen
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        with self.lock:
+            return next(self.iterator)
+
+def threadsafe_generator(func):
+    @functools.wraps(func)
+    def gen(*a, **kw):
+        return threadsafe_iterator(func(*a, **kw))
+    return gen
 
 class DataSet():
 
@@ -48,7 +51,8 @@ class DataSet():
         np.random.seed(1)# max number of frames a video can have for us to use it
 
 
-#    @threadsafe_generator
+    @threadsafe_generator
+    #in this method the sequences are piled into batch 
     def frame_generator(self):
         while 1:
             image_batch, seg_batch = [], []
@@ -70,7 +74,8 @@ class DataSet():
         img_mean = image.mean()
         out_img = (image - img_mean) * factor + img_mean
         return out_img
-            
+    
+#image augmentation with crop, contrast and brightness adjust, rotation, flip and shift        
     def image_aug(self, img, seg, crop_y, crop_x, crop_y_stop, crop_x_stop, flip, rotate, width_shift_range, height_shift_range):
         img_crop = img[crop_y:crop_y_stop, crop_x:crop_x_stop]
         img_max = img_crop.max()
@@ -101,6 +106,7 @@ class DataSet():
 #        seg_crop = np.expand_dims(seg_crop, axis=-1)
         return img_crop, seg_crop
 
+#method that build the temporal image sequences and apply data augmentation
     def build_image_sequence(self, sample):
         sequence_image = []
         sequence_seg = []

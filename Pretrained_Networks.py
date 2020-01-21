@@ -1,16 +1,14 @@
+#same content of "Networks.py" but the weights of each layer are initialized according to the pretrained model 
+#available at this link: https://drive.google.com/file/d/1uQOdelJoXrffmW_1OCu417nHKtQcH3DJ/view?usp=sharing
 import tensorflow as tf
-import numpy as np
 import pickle
-#import matplotlib.pyplot as plt
+from typing import List
+from tensorflow.python.keras import regularizers
 
 try:
     import tensorflow.python.keras as k
 except AttributeError:
     import tensorflow.keras as k
-
-from typing import List
-
-from tensorflow.python.keras import regularizers
 
 class DownBlock2D(k.Model):
 
@@ -24,7 +22,6 @@ class DownBlock2D(k.Model):
         self.LReLU = []
         self.total_stride = 1
         self.recurrent_dropout = 0.2
-#        self.bias = tf.keras.initializers.Constant(-0.198729)
         
         first = True
         for kxy_lstm, kout_lstm, dropout, reg, kernel_init in lstm_kernels:
@@ -106,7 +103,6 @@ class UpBlock2D(k.Model):
         self.BN = []
         self.LReLU = []
         self.return_logits = return_logits
-        self.bias = tf.keras.initializers.Constant(-0.198729)
         
         for l_ind, (kxy, kout, dropout, reg, kernel_init) in enumerate(kernels):
             C = tf.keras.initializers.Constant
@@ -172,6 +168,7 @@ class ULSTMnet2D(k.Model):
 
         for layer_ind, (conv_filters, lstm_filters) in enumerate(zip(net_params['down_conv_kernels'],
                                                                      net_params['lstm_kernels'])):
+            #loading the file with the weights list for each block
             weights_list = []
             for i in range(0, 5):
                 with open("/home/stormlab/seg/layer_weights/block_%s_layer_%s_weights.npy" %(layer_ind, i), "rb") as fp:   # Unpickling
@@ -183,6 +180,7 @@ class ULSTMnet2D(k.Model):
         
         for layer_ind, conv_filters in enumerate(net_params['up_conv_kernels']):
             up_factor = 2 if layer_ind > 0 else 1
+            #loading the file with the weights list for each block
             weights_list = []
             for i in range(0, 5):
                 with open("/home/stormlab/seg/layer_weights/block_%s_layer_%s_weights.npy" %(layer_ind + 4, i), "rb") as fp:   # Unpickling

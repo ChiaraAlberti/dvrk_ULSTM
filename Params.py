@@ -1,3 +1,4 @@
+#settings of the parameters
 import DataHandeling
 import os
 from datetime import datetime
@@ -36,7 +37,7 @@ class CTCParams(ParamsBase):
 
 
     # -------- Training ----------
-    num_iterations = 15000
+    num_iterations = 100000
     validation_interval = 10
     print_to_console_interval = 10
 
@@ -68,6 +69,8 @@ class CTCParams(ParamsBase):
         else:
             os.environ['CUDA_VISIBLE_DEVICES'] = "-1"    
 
+
+        #initialization of dataHandeling classs
         self.data_provider = self.data_provider_class(sequence_folder_list=self.root_data_dir,
                                                             image_crop_size=self.crop_size,
                                                             image_reshape_size = self.reshape_size,
@@ -78,8 +81,10 @@ class CTCParams(ParamsBase):
                                                             )
 
 
-        now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-#        now_string = 'HP_tuning_regularization'
+#        now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+        now_string = 'Pretrained_model'
+        
+        #initialization of the various dir folders
         if self.load_checkpoint and self.continue_run:
             if os.path.isdir(self.load_checkpoint_path):
                 if self.load_checkpoint_path.endswith('tf-ckpt') or self.load_checkpoint_path.endswith('tf-ckpt/'):
@@ -101,8 +106,7 @@ class CTCParams(ParamsBase):
         if not self.dry_run:
             os.makedirs(self.experiment_log_dir, exist_ok=True)
             os.makedirs(self.experiment_save_dir, exist_ok=True)
-#            os.makedirs(os.path.join(self.experiment_log_dir, 'train'), exist_ok=True)
-#            os.makedirs(os.path.join(self.experiment_log_dir, 'val'), exist_ok=True)
+
         self.channel_axis = 1 if self.data_format == 'NCHW' else 3
         if self.profile:
             if 'CUPTI' not in os.environ['LD_LIBRARY_PATH']:

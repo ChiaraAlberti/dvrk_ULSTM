@@ -1,3 +1,5 @@
+#same neural network of Train_main but with hyperparamenter tuning 
+
 import argparse
 import os
 import pickle
@@ -144,12 +146,11 @@ def train(run_folder, hparams, params_value):
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             ckpt.step.assign_add(1)
             train_loss(loss)
-            segmentation = tf.cast(tf.greater(softmax, 0.5), tf.float32)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(train_metrics):
-                metric(label[:, -1], segmentation[:, -1])
+                metric(label[:, -1], softmax[:, -1])
                 train_metrics[i] = metric
             return softmax, predictions, loss
 
@@ -158,12 +159,11 @@ def train(run_folder, hparams, params_value):
             predictions, softmax = model(image, False)
             t_loss, t_dice_loss, t_bce_loss = loss_fn.bce_dice_loss(label, softmax)
             val_loss(t_loss)
-            segmentation = tf.cast(tf.greater(softmax, 0.5), tf.float32)
             if params.channel_axis == 1:
                 predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(val_metrics):
-                metric(label[:, -1], segmentation[:, -1])
+                metric(label[:, -1], softmax[:, -1])
                 val_metrics[i] = metric
             return softmax, predictions, t_loss
         
@@ -173,9 +173,8 @@ def train(run_folder, hparams, params_value):
             tt_loss, tt_dice_loss, tt_bce_loss = loss_fn.bce_dice_loss(label, softmax)
 #            val_loss(t_loss[:, -1])
             test_loss(tt_loss)
-            segmentation = tf.cast(tf.greater(softmax, 0.5), tf.float32)
             for i, metric in enumerate(test_metrics):
-                metric(label[:, -1], segmentation[:, -1])
+                metric(label[:, -1], softmax[:, -1])
                 test_metrics[i] = metric
             return softmax, predictions, tt_loss
 
@@ -338,7 +337,8 @@ def train(run_folder, hparams, params_value):
                         test_imgs_dict['Output_bw'] = bw_predictions
                         tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict)
                         log_print('Printed Testing Step: {} to Tensorboard'.format(i))
-                        
+                    
+                    #save the values on tensorboard 
                     with tf.summary.create_file_writer(run_folder).as_default():
                         hp.hparams(hparams)  # record the values used in this trial
                         precision_train = train_metrics[5].result()
@@ -511,7 +511,7 @@ if __name__ == '__main__':
     # finally:
     #     log_print('Done')
     
-
+    #download the file with the parameters and their values
     df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list_reg.csv')
     df.fillna(4,inplace=True)
     dict_param = df.to_dict(orient='list')
@@ -520,6 +520,7 @@ if __name__ == '__main__':
     params_value = [None]*5
     model_number = 0
     
+    #define the hyperparameters and the metrics
     HP_DROPOUT = hp.HParam('dropout', hp.Discrete(dict_param['Dropout']))
     HP_DROPINPUT = hp.HParam('drop input', hp.Discrete(dict_param['Drop_input']))
     HP_L1 = hp.HParam('l1', hp.Discrete(dict_param['L1']))
@@ -532,7 +533,7 @@ if __name__ == '__main__':
     METRIC_LOSS_TEST = 'loss_test'
 
   
-
+#cycle on the parameters values , create the tensorboard writer file and call the train method
     for dropout in HP_DROPOUT.domain.values:
         params_value[1] = dropout
         for drop_input in HP_DROPINPUT.domain.values:
@@ -564,6 +565,7 @@ if __name__ == '__main__':
                     print({h.name: hparams[h] for h in hparams})
                     train(os.path.join(params.experiment_log_dir, 'hparam_tuning/') + run_name, hparams, params_value)
                     model_number += 1
+                    
                     
                     with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
                         reader = csv.reader(csv_file)

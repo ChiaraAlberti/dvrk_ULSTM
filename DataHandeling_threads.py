@@ -10,9 +10,8 @@ import pickle
 import utils
 import time
 import scipy
-from scipy.ndimage.interpolation import map_coordinates
-from scipy.ndimage.filters import gaussian_filter
-from PIL import Image
+
+#the images are all stores in memory and enqueued. Then, dequeued when needed
 
 class CTCRAMReaderSequence2D(object):
     def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, deal_with_end=0, batch_size=4,
@@ -38,6 +37,7 @@ class CTCRAMReaderSequence2D(object):
         self.q_list, self.q_stat_list = self._create_queues()
         np.random.seed(1)
 
+#read the images according to the unroll_length and store them in the memory.
     def _read_sequence_to_ram_(self):
         sequence_folder = self.sequence_folder
         utils.log_print('Reading Sequence')
@@ -63,8 +63,6 @@ class CTCRAMReaderSequence2D(object):
                                               filename_list[index - self.unroll_len + j +1][0]), -1)
                 if img is None:
                     raise ValueError('Could not load image: {}'.format(os.path.join(sequence_folder, filename_list[index - self.unroll_len + j][0])))
-#            img = img.astype(np.float32)
-#            img = (img - img.mean()) / (img.std())
                 img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
                 img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
                 if filename_list[index - self.unroll_len + j +1][1] == 'None':
@@ -90,53 +88,6 @@ class CTCRAMReaderSequence2D(object):
         #     sequence_folder = sequence_folder[0]
         return self.sequence_data[sequence_folder], sequence_folder
 
-    def _read_sequence_metadata(self):
-        sequence_folder = random.choice(self.sequence_folder_list)
-        if isinstance(sequence_folder, tuple):
-            sequence_folder = sequence_folder[0]
-        with open(os.path.join(sequence_folder, 'lstm_baseline_ds_bw.pkl'), 'rb') as fobj:
-            metadata = pickle.load(fobj)
-        return metadata
-
-    @staticmethod
-    def _get_elastic_affine_matrix_(shape_size, alpha_affine):
-        """Elastic deformation of images as described in [Simard2003]_ (with modifications).
-         .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
-              Convolutional Neural Networks applied to Visual Document Analysis", in
-              Proc. of the International Conference on Document Analysis and
-              Recognition, 2003.
-          Based on https://gist.github.com/erniejunior/601cdf56d2b424757de5
-         """
-        random_state = np.random.RandomState(None)
-
-        # Random affine
-        center_square = np.float32(shape_size) // 2
-        square_size = min(shape_size) // 3
-        pts1 = np.float32(
-            [center_square + square_size, [center_square[0] + square_size, center_square[1] - square_size],
-             center_square - square_size])
-        pts2 = pts1 + random_state.uniform(-alpha_affine, alpha_affine, size=pts1.shape).astype(np.float32)
-        affine_matrix = cv2.getAffineTransform(pts1, pts2)
-
-        return affine_matrix, random_state
-
-    @staticmethod
-    def _get_transformed_image_(image, affine_matrix, indices, seg=False):
-        shape = image.shape
-        trans_img = cv2.warpAffine(image, affine_matrix, shape[::-1], borderMode=cv2.BORDER_REFLECT_101)
-        trans_coord = map_coordinates(trans_img, indices, order=1, mode='reflect').reshape(shape)
-        return trans_coord
-
-    @staticmethod
-    def _get_indices4elastic_transform(shape, alpha, sigma, random_state):
-        dxr = random_state.rand(*shape)
-        dx = gaussian_filter((dxr * 2 - 1), sigma) * alpha
-        dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
-
-        x, y = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]))
-        indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
-
-        return indices
     
     def shift_img(self, image, segment, width_shift_range, height_shift_range, img_shape):
         """This fn will perform the horizontal or vertical shift"""
@@ -160,6 +111,7 @@ class CTCRAMReaderSequence2D(object):
         out_img = (image - img_mean) * factor + img_mean
         return out_img
 
+#called by start_queues, this method read the images, apply the data augmentation and enqueue them. 
     def _load_and_enqueue(self, q, q_stat):
         try:
             while not self.coord.should_stop():
@@ -181,15 +133,6 @@ class CTCRAMReaderSequence2D(object):
 
                 flip = np.random.randint(0, 2, 2) if self.randomize else [0, 0]
                 rotate = np.random.randint(0, 4) if self.randomize else 0
-                if self.elastic_augmentation:
-                    affine_matrix, random_state = self._get_elastic_affine_matrix_(self.sub_seq_size,
-                                                                                   self.sub_seq_size[1] * 0.08)
-                    indices = self._get_indices4elastic_transform(self.sub_seq_size, self.sub_seq_size[1] * 2,
-                                                                  self.sub_seq_size[1] * 0.15,
-                                                                  random_state)
-                else:
-                    affine_matrix = indices = None
-
                 filename_idx = list(range(len(seq_data['file_list'])))
 #
 #                if random_reverse:
@@ -228,34 +171,6 @@ class CTCRAMReaderSequence2D(object):
                         img_crop = self._adjust_brightness_(img_crop, random_brightness_delta)
 #                        img_crop = cv2.normalize(img_crop, None, 0.0, 1.0, cv2.NORM_MINMAX)
 
-                    if self.elastic_augmentation:
-                        for i in range(img_crop.shape[2]):
-                            trans_img = self._get_transformed_image_(img_crop[:,:, i], affine_matrix, indices)
-                            img_crop[:, :, i] = trans_img
-                        if np.any(np.isnan(img_crop)):
-                            raise ValueError('NaN in image {} from sequence: {}'.format(file_idx, sequence_folder))
-                        if np.any(np.isinf(img_crop)):
-                            raise ValueError('Inf in image {} from sequence: {}'.format(file_idx, sequence_folder))
-                        if not np.equal(seg_crop, -1).all():
-#                            seg_not_valid = np.equal(seg_crop, -1)
-#                            labeled_gt = seg_crop
-#                            labeled_gt[:, 0] = 0
-#                            labeled_gt[:, -1] = 0
-#                            labeled_gt[-1, :] = 0
-#                            labeled_gt[0, :] = 0imard20
-                            seg_crop = self._get_transformed_image_(seg_crop.astype(np.float32), affine_matrix,
-                                                                     indices, seg=True)
-#                            trans_not_valid = self._get_transformed_image_(seg_not_valid.astype(np.float32),
-#                                                                           affine_matrix,
-#                                                                           indices, seg=True)
-#                            trans_seg_fix = self._fix_transformed_segmentation(trans_seg)
-#                            trans_not_valid = np.logical_or(np.greater(trans_not_valid, 0.5), np.equal(trans_seg, -1))
-#                            seg_crop = trans_seg_fix
-#                            seg_crop[trans_not_valid] = 0
-                            if np.any(np.isnan(seg_crop)):
-                                raise ValueError('NaN in Seg {} from sequence: {}'.format(file_idx, sequence_folder))
-                            if np.any(np.isinf(seg_crop)):
-                                raise ValueError('Inf in Seg {} from sequence: {}'.format(file_idx, sequence_folder))
                     if flip[0]:
                         img_crop = cv2.flip(img_crop, 0)
                         seg_crop = cv2.flip(seg_crop, 0)
@@ -308,6 +223,7 @@ class CTCRAMReaderSequence2D(object):
             self.coord.request_stop()
             raise err
 
+#initialization of a number of queues equal to the batch size
     def _create_queues(self):
         def normed_size(_q):
             @tf.function
@@ -329,6 +245,7 @@ class CTCRAMReaderSequence2D(object):
 
         return q_list, q_stat_list
 
+#called by get_batch, it dequeues a number of elements from each list equal to the unroll length and create a tf tensor
     def _batch_queues_(self):
         with tf.name_scope('DataHandler'):
             img_list = []
@@ -358,12 +275,7 @@ class CTCRAMReaderSequence2D(object):
 
         return image_batch, seg_batch, is_last_batch
 
-    def _create_sequence_queue(self):
-        sequence_queue = queue.Queue(maxsize=len(self.sequence_folder_list))
-        for sequence in self.sequence_folder_list:
-            sequence_queue.put(sequence)
-        return sequence_queue
-
+#called in the main in order to create the queues
     def start_queues(self, coord=tf.train.Coordinator(), debug=False):
         self._read_sequence_to_ram_()
         threads = []
@@ -391,6 +303,7 @@ class CTCRAMReaderSequence2D(object):
         for q in self.q_list:
             q.close(cancel_pending_enqueues=True)
 
+#called in the main to get the batch
     def get_batch(self):
         return self._batch_queues_()
 

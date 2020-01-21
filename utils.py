@@ -1,7 +1,7 @@
 from PIL import ImageSequence, Image
 import numpy as np
 from datetime import datetime
-import Networks as Nets
+import Pretrained_Networks as Nets
 
 __author__ = 'arbellea@post.bgu.ac.il'
 
