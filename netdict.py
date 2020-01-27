@@ -105,4 +105,28 @@ def Net_type(dropout, reg, kernel_init):
                 ],
             }
     }
-    return net_kernel_params        
+    return net_kernel_params 
+
+
+def TrainableLayers(model, option):
+    if option == 'none':
+        model.trainable = False
+    
+    if option == 'full':
+        model.trainable = True
+        
+    if option == 'only_enc':
+        for i, block in enumerate(model.layers):
+            if i < 4:
+                block.trainable = True
+            else:
+                block.Trainable = False
+    
+    if option == 'only_dec':
+        for i, block in enumerate(model.layers):
+            if i > 3:
+                block.trainable = True
+            else:
+                block.Trainable = False
+    return model
+               

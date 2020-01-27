@@ -6,7 +6,7 @@ import pickle
 import Networks as Nets
 import Params
 import tensorflow as tf
-from Data_generator import DataSet
+from Sequence_generator import DataGenerator
 import sys
 from utils import log_print
 import cv2
@@ -18,14 +18,14 @@ from netdict import Net_type
 import csv 
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-import keras as k
 
-#try:
-#    # noinspection PyPackageRequirements
-#    import tensorflow.python.keras as k
-#except AttributeError:
-#    # noinspection PyPackageRequirements,PyUnresolvedReferences
-#    import tensorflow.keras as k
+
+try:
+    # noinspection PyPackageRequirements
+    import tensorflow.python.keras as k
+except AttributeError:
+    # noinspection PyPackageRequirements,PyUnresolvedReferences
+    import tensorflow.keras as k
 
 METRICS = [
       k.metrics.TruePositives(name='tp'),
@@ -80,14 +80,27 @@ class LossFunction:
         return loss, dice_loss, bce_loss
     
 
-def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_type, params_value):
+def train():
    
     device = '/gpu:0' if params.gpu_id >= 0 else '/cpu:0'
     with tf.device(device):
+        
+        dropout = 0
+        drop_input = False
+        l1 = 0
+        l2 = 0
+        kernel_init = 'he_normal'
+        net_type = 'cpu_net'
+        lr = 0.0005
+        lr_decay = 0.96
 
         # Model
-        net_kernel_params = Net_type(dropout, (l1, l2), kern_init)['original_net']
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, False)
+        net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input)
+        
+        inputs = tf.keras.Input(shape=[params.unroll_len, params.reshape_size[0], params.reshape_size[1], 1])
+        outputs = model(inputs)
+        model_keras = tf.keras.Model(inputs=inputs, outputs=outputs)
 
         # Losses and Metrics
         loss_fn = LossFunction()
@@ -113,14 +126,15 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
                 decay_steps=100000,
                 decay_rate=lr_decay, 
                 staircase=True)
-        optimizer = k.optimizers.Adam(learning_rate=lr_schedule)
         
-        cp = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(params.experiment_save_dir, 'NN_' + str(params_value[0]), 'tf_ckpts'),
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+        
+        cp = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(params.experiment_save_dir, 'tf_ckpts'),
                                         monitor='val_loss',
                                         save_best_only=True,
                                         verbose=1)
 
-        tb = tf.keras.callbacks.TensorBoard(log_dir=os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0])), 
+        tb = tf.keras.callbacks.TensorBoard(log_dir=os.path.join(params.experiment_log_dir), 
                                             write_graph=True, write_images=True, update_freq='epoch')
 
                         
@@ -160,14 +174,14 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
             valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
             valid_list_train, valid_list_val = train_test_split(valid_masks, test_size= 0.2)
             partition = {'train': valid_list_train, 'validation': valid_list_val}
-            data_training = DataSet(partition['train'], filename_list, sequence_folder, **parameter)
-            data_validation = DataSet(partition['validation'], filename_list, sequence_folder, **parameter)
-            train_generator = data_training.frame_generator()
-            val_generator = data_validation.frame_generator()
+            data_training = DataGenerator(partition['train'], filename_list, sequence_folder, **parameter)
+            data_validation = DataGenerator(partition['validation'], filename_list, sequence_folder, **parameter)
+#            train_generator = data_training.frame_generator()
+#            val_generator = data_validation.frame_generator()
             steps = int(np.floor(len(partition['train'])/params.batch_size))
             val_steps = int(np.floor(len(partition['validation'])/params.batch_size))
-            model.compile(optimizer=optimizer, loss=loss_fn, metrics= METRICS)
-            history = model.fit(x=train_generator,verbose=1, callbacks=[tb, cp], validation_data=val_generator, 
+            model_keras.compile(optimizer=optimizer, loss=loss_fn, metrics= METRICS)
+            history = model_keras.fit(x=data_training,verbose=1, callbacks=[tb, cp], validation_data=data_validation, 
                                           steps_per_epoch=steps, validation_steps = val_steps, epochs= 200)
 #                show_dataset_labels(image_sequence, seg_sequence)
             
@@ -183,24 +197,23 @@ def train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_ty
         finally:
             if not params.dry_run:
                 log_print('Saving Model of inference:')
-                model_fname = os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model')
-#                model.save_weights(model_fname, save_format='tf')
-#                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model_params.pickle'), 'wb') as fobj:
-#                    pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
-#                                fobj, protocol=pickle.HIGHEST_PROTOCOL)
-#                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv'), 'w') as fobj:
-#                    writer = csv.writer(fobj)
-#                    model_dict = {'Model': []}
-#                    model_dict.update(model_dict.fromkeys(dict_param.keys(),[]))
-#                    for i, key in enumerate(model_dict.items()):
-#                        model_dict[key[0]] = params_value[i]
-#                    model_dict.update({'Train_loss': final_train_loss, 'Train_precision': final_train_prec,
-#                                      'Val_loss': final_val_loss, 'Val_precision': final_val_prec})
-#                    for key, value in model_dict.items():
-#                       writer.writerow([key, value])
-#                log_print('Saved Model to file: {}'.format(model_fname))
-#                end_time = time.time()
-#                log_print('Program execution time:', end_time - start_time)                
+                model_fname = os.path.join(params.experiment_save_dir, 'model')
+                model.save_weights(model_fname, save_format='tf')
+                with open(os.path.join(params.experiment_save_dir, 'model_params.pickle'), 'wb') as fobj:
+                    pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
+                                fobj, protocol=pickle.HIGHEST_PROTOCOL)
+                with open(os.path.join(params.experiment_save_dir, 'params_list.csv'), 'w') as fobj:
+                    writer = csv.writer(fobj)
+                    model_dict = {'Dropout': dropout, 'Drop_input': drop_input, 'L1': l1, 'L2': l2, 
+                                  'Kernel init': kernel_init, 'Net type': net_type, 'Learning rate': lr, 
+                                  'Lr decay': lr_decay}
+                    model_dict.update({'Train_loss': final_train_loss, 'Train_precision': final_train_prec,
+                                      'Val_loss': final_val_loss, 'Val_precision': final_val_prec})
+                    for key, value in model_dict.items():
+                       writer.writerow([key, value])
+                log_print('Saved Model to file: {}'.format(model_fname))
+                end_time = time.time()
+                log_print('Program execution time:', end_time - start_time)                
             else:
                 log_print('WARNING: dry_run flag is ON! Not Saving Model')
             log_print('Closing gracefully')
@@ -329,45 +342,5 @@ if __name__ == '__main__':
     #     log_print('Done')
     
 
-    df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list_full.csv')
-    df.fillna(4,inplace=True)
-    dict_param = df.to_dict(orient='list')
-    dict_param = {k:[elem for elem in v if elem !=4] for k,v in dict_param.items()}
-    complete_dict = []
-    params_value = [None]*10
-    model_number = 0
-    
-    for _, dropout in enumerate(dict_param['Dropout']):
-        params_value[1] = dropout
-        for _, drop_input in enumerate(dict_param['Drop_input']):
-            params_value[2] = drop_input
-            for _, lr in enumerate(dict_param['Learning rate']):
-                params_value[3] = lr
-                for _, lr_decay in enumerate(dict_param['Learning rate decay']):
-                    params_value[4] = lr_decay
-                    for _, l1 in enumerate(dict_param['L1']):
-                        params_value[5] = l1
-                        for _, l2 in enumerate(dict_param['L2']):
-                            params_value[6] = l2
-                            for _, NN_type in enumerate(dict_param['Type of NN']):
-                                params_value[7] = NN_type
-                                for _, kern_init in enumerate(dict_param['Kernel init']):
-                                    params_value[8] = kern_init
-                                    for _, crop_size in enumerate(dict_param['Crop']):
-                                        params_value[9] = crop_size
-                                        params_value[0] = model_number
-                                        train(dropout, drop_input, lr, crop_size, kern_init, l1, l2, lr_decay, NN_type, params_value)
-                                        with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
-                                            reader = csv.reader(csv_file)
-                                            model_dict = dict(reader)
-                                            complete_dict.append(model_dict)
-                                        model_number += 1
-                                        with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
-                                            writer = csv.DictWriter(f, complete_dict[0].keys())
-                                            writer.writeheader()
-                                            writer.writerows(complete_dict)
+    train()
 
-with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
-    writer = csv.DictWriter(f, complete_dict[0].keys())
-    writer.writeheader()
-    writer.writerows(complete_dict)

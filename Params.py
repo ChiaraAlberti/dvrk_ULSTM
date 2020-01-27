@@ -34,16 +34,17 @@ class CTCParams(ParamsBase):
     batch_size = 5
     unroll_len = 5
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
+    class_weights = [0.4, 0.6]
 
 
     # -------- Training ----------
-    num_iterations = 100000
+    num_iterations = 80000
     validation_interval = 10
     print_to_console_interval = 10
 
     # ---------Save and Restore ----------
     load_checkpoint = False
-    load_checkpoint_path = ''  # Used only if load_checkpoint is True
+    load_checkpoint_path = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2020-01-21_163109/tf_ckpts/'  # Used only if load_checkpoint is True
     continue_run = False
     save_checkpoint_dir = ROOT_SAVE_DIR
     save_checkpoint_iteration = 5000
@@ -52,7 +53,7 @@ class CTCParams(ParamsBase):
 
     # ---------Tensorboard-------------
     tb_sub_folder = 'LSTMUNet'
-    write_to_tb_interval = 100
+    write_to_tb_interval = 10
     save_log_dir = ROOT_SAVE_DIR
 
     # ---------Debugging-------------
@@ -82,7 +83,7 @@ class CTCParams(ParamsBase):
 
 
 #        now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-        now_string = 'Pretrained_model'
+        now_string = 'HP_tuning_models'
         
         #initialization of the various dir folders
         if self.load_checkpoint and self.continue_run:
