@@ -27,6 +27,26 @@ def Net_type(dropout, reg, kernel_init):
                     [(5, 32, 0, (0,0), kernel_init), (5, 32, dropout, reg, kernel_init), (1, 1, dropout, reg, kernel_init)],
                 ],
             },   
+            'imagenet_net': {            
+                'down_conv_kernels': [
+                    [(3, 64, 0, (0,0), kernel_init), (3, 64, dropout, (0,0), kernel_init)],  
+                    [(3, 128, 0, (0,0), kernel_init), (3, 128, dropout, reg, kernel_init)],
+                    [(3, 256, 0, (0,0), kernel_init), (3, 256, dropout, (0,0), kernel_init), (5, 256, dropout, (0,0), kernel_init)],
+                    [(3, 512, 0, (0,0), kernel_init), (3, 512, dropout, reg, kernel_init), (5, 512, dropout, (0,0), kernel_init)],
+                ],
+                'lstm_kernels': [
+                    [(3, 128, dropout, (0,0), kernel_init)], 
+                    [(3, 256, dropout, reg, kernel_init)],
+                    [(3, 256, dropout, (0,0), kernel_init)],
+                    [(3, 512, dropout, reg, kernel_init)],
+                ],
+                'up_conv_kernels': [
+                    [(3, 256, 0, (0,0), kernel_init), (3, 256, dropout, (0,0), kernel_init)],
+                    [(3, 128, 0, (0,0), kernel_init), (3, 128, dropout, reg, kernel_init)],
+                    [(3, 64, 0, (0,0), kernel_init), (3, 64, dropout, (0,0), kernel_init)],
+                    [(3, 32, 0, (0,0), kernel_init), (3, 32, dropout, reg, kernel_init), (1, 1, dropout, reg, kernel_init)],
+                ],
+            },   
             'deeper_net': {
                 'down_conv_kernels': [
                     [(5, 32, 0, (0,0), kernel_init), (5, 32, dropout, (0,0), kernel_init)],

@@ -3,7 +3,7 @@ import argparse
 import os
 import pickle
 # noinspection PyPackageRequirements
-import Pretrained_Networks as Nets
+import Networks as Nets
 import Params
 import tensorflow as tf
 import DataHandeling 
@@ -99,6 +99,7 @@ class WeightedLoss():
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
         loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 0.5)
+#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
         return loss
 
 def train():
@@ -114,13 +115,13 @@ def train():
         l2 = 0
         kernel_init = 'he_normal'
         net_type = 'cpu_net'
-        pretraining = False
-        if pretraining:
-            lrate = 0.00001
+        pretraining = 'cells'
+        if not pretraining:
+            lrate = 0.0001
         else:
             lrate  = 0.0001
-        lr_decay = None
-        pretraining_type = 'only_dec'
+        lr_decay = 0.96
+        pretraining_type = 'full'
         
         net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
         model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining)
@@ -141,16 +142,16 @@ def train():
         final_train_prec = 0
         final_val_prec = 0
 
-        #Exponential learning rate decay
-#        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-#                initial_learning_rate = lr, 
-#                decay_steps=100000,
-#                decay_rate=lr_decay, 
-#                staircase=True)
+#        Exponential learning rate decay
+        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+                initial_learning_rate = lrate, 
+                decay_steps=100000,
+                decay_rate=lr_decay, 
+                staircase=True)
         
         #Adam optimizer
-#        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
-        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lrate)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+#        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lrate)
         
         #Checkpoint 
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
@@ -327,8 +328,8 @@ def train():
                         train_imgs_dict['Output_bw'] = bw_predictions
                         tboard(train_summary_writer, train_log_dir, int(ckpt.step), train_scalars_dict, train_imgs_dict)
                         #reset the metrics
-                        for i in range(0, 4):
-                            train_metrics[i].reset_states()
+#                        for i in range(0, 4):
+#                            train_metrics[i].reset_states()
                             
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -382,8 +383,8 @@ def train():
                         val_imgs_dict['Output_bw'] = bw_predictions
                         tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict)
                         
-                        for i in range(0, 4):
-                            val_metrics[i].reset_states()
+#                        for i in range(0, 4):
+#                            val_metrics[i].reset_states()
                     
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -464,7 +465,7 @@ def train():
 if __name__ == '__main__':
 
     class AddNets(argparse.Action):
-        import Pretrained_Networks as Nets
+        import Networks as Nets
 
         def __init__(self, option_strings, dest, **kwargs):
             super(AddNets, self).__init__(option_strings, dest, **kwargs)

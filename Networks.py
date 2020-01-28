@@ -26,7 +26,7 @@ class DownBlock2D(k.Model):
         
         first = True
         for kxy_lstm, kout_lstm, dropout, reg, kernel_init in lstm_kernels:
-            if self.pretraining:
+            if self.pretraining == 'cells':
                 C = tf.keras.initializers.Constant
                 if first:
                     self.ConvLSTM.append(k.layers.ConvLSTM2D(filters=kout_lstm, kernel_size=kxy_lstm, strides=1,
@@ -50,7 +50,7 @@ class DownBlock2D(k.Model):
         for l_ind, (kxy, kout, dropout, reg, kernel_init) in enumerate(conv_kernels):
             _stride = stride if l_ind == 0 else 1
             self.total_stride *= _stride
-            if self.pretraining:
+            if self.pretraining== 'cells':
                 C = tf.keras.initializers.Constant
                 self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=_stride, use_bias=True, kernel_initializer=C(weights_list[3 + l_ind*2]),
                                                  bias_initializer = C(weights_list[4 + l_ind*2]),
@@ -59,6 +59,14 @@ class DownBlock2D(k.Model):
                 self.BN.append(k.layers.BatchNormalization(axis=channel_axis, beta_initializer = C(weights_list[7 + l_ind*4]),
                                                            gamma_initializer = C(weights_list[8 + l_ind*4]), moving_mean_initializer = C(weights_list[9 + l_ind*4]),
                                                            moving_variance_initializer = C(weights_list[10 + l_ind*4])))
+            elif self.pretraining == 'image_net':
+                C = tf.keras.initializers.Constant
+                self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=_stride, use_bias=True, kernel_initializer=C(weights_list[0 + l_ind*2]),
+                                                 bias_initializer = C(weights_list[1 + l_ind*2]),
+                                                 data_format=data_format_keras, padding='same',
+                                                 kernel_regularizer=regularizers.l1_l2(l1=reg[0], l2=reg[1])))
+                self.BN.append(k.layers.BatchNormalization(axis=channel_axis))
+            
             else:
                 self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=_stride, use_bias=True, kernel_initializer=kernel_init,
                                  data_format=data_format_keras, padding='same',
@@ -69,7 +77,7 @@ class DownBlock2D(k.Model):
     def call(self, inputs, training=None, mask=None):
         convlstm = inputs
         for conv_lstm_layer in self.ConvLSTM:
-            convlstm = conv_lstm_layer(convlstm)
+            convlstm = conv_lstm_layer(convlstm, training= training)
         
         orig_shape = convlstm.shape
         conv_input = tf.reshape(convlstm, [orig_shape[0] * orig_shape[1], orig_shape[2], orig_shape[3], orig_shape[4]])
@@ -119,7 +127,7 @@ class UpBlock2D(k.Model):
         self.pretraining = pretraining
         
         for l_ind, (kxy, kout, dropout, reg, kernel_init) in enumerate(kernels):
-            if self.pretraining:
+            if self.pretraining == 'cells':
                 C = tf.keras.initializers.Constant
                 if layer_ind_up ==3:
                     if l_ind != 2:
@@ -143,6 +151,20 @@ class UpBlock2D(k.Model):
                     self.BN.append(k.layers.BatchNormalization(axis=self.channel_axis, beta_initializer = C(weights_list[4 + l_ind*4]),
                                                                gamma_initializer = C(weights_list[5 + l_ind*4]), moving_mean_initializer = C(weights_list[6 + l_ind*4]),
                                                                moving_variance_initializer = C(weights_list[7 + l_ind*4])))
+#            elif self.pretraining == 'imagenet':
+#                C = tf.keras.initializers.Constant
+#                if l_ind != 2:
+#                    self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=1, use_bias=True,
+#                                                     data_format=self.data_format_keras, padding='same', kernel_initializer=C(weights_list[0 + l_ind]),
+#                                                     kernel_regularizer=regularizers.l1_l2(l1=reg[0], l2=reg[1])))
+#                    self.BN.append(k.layers.BatchNormalization(axis=self.channel_axis, beta_initializer = C(weights_list[2 + l_ind*4]),
+#                                                               gamma_initializer = C(weights_list[3 + l_ind*4]), moving_mean_initializer = C(weights_list[4 + l_ind*4]),
+#                                                               moving_variance_initializer = C(weights_list[5 + l_ind*4])))
+#                else:
+#                    self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=1, use_bias=True,
+#                                                     data_format=self.data_format_keras, padding='same', kernel_initializer='he_normal',
+#                                                     kernel_regularizer=regularizers.l1_l2(l1=reg[0], l2=reg[1])))
+#                    self.BN.append(k.layers.BatchNormalization(axis=self.channel_axis))
             else:
                 self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=1, use_bias=True, kernel_initializer=kernel_init,
                                  data_format=self.data_format_keras, padding='same',
@@ -173,10 +195,12 @@ class ULSTMnet2D(k.Model):
         self.channel_axis = 1 if data_format[1] == 'C' else -1
         self.DownLayers = []
         self.UpLayers = []
+        self.ConnectLayer = []
         self.total_stride = 1
         self.dropout_rate = 0.2
         self.drop_input = drop_input
         self.pad_image = pad_image
+        self.pretraining = pretraining
 
         if not len(net_params['down_conv_kernels']) == len(net_params['lstm_kernels']):
             raise ValueError('Number of layers in down path ({}) do not match number of LSTM layers ({})'.format(
@@ -189,22 +213,39 @@ class ULSTMnet2D(k.Model):
                                                                      net_params['lstm_kernels'])):
             #loading the file with the weights list for each block
             weights_list = []
-            for i in range(0, 5):
-                with open("/home/stormlab/seg/layer_weights/block_%s_layer_%s_weights.npy" %(layer_ind, i), "rb") as fp:   # Unpickling
-                    b = pickle.load(fp)
-                weights_list.extend(b)
+            if pretraining == 'cells':
+                for i in range(0, 5):
+                    with open("/home/stormlab/seg/layer_weights/%s/block_%s_layer_%s_weights.npy" %(pretraining, layer_ind, i), "rb") as fp:   # Unpickling
+                        b = pickle.load(fp)
+                    weights_list.extend(b)
+            elif pretraining == 'imagenet':
+                for i in range(0, 2):
+                    with open("/home/stormlab/seg/layer_weights/%s/block_%s_layer_%s_weights.npy" %(pretraining, layer_ind, i), "rb") as fp:   # Unpickling
+                        b = pickle.load(fp)
+                    weights_list.extend(b)
             stride = 2 if layer_ind < len(net_params['down_conv_kernels']) - 1 else 1
             self.DownLayers.append(DownBlock2D(conv_filters, lstm_filters, stride, data_format, weights_list, pretraining))
             self.total_stride *= self.DownLayers[-1].total_stride
+        
+        if pretraining == 'imagenet':
+            for i in range(0, 3):
+                self.ConnectLayer.append(k.layers.Conv2D(filters=512, kernel_size=3, strides=1, use_bias=True,
+                                                         data_format=self.data_format_keras, padding='same'))
         
         for layer_ind, conv_filters in enumerate(net_params['up_conv_kernels']):
             up_factor = 2 if layer_ind > 0 else 1
             #loading the file with the weights list for each block
             weights_list = []
-            for i in range(0, 5):
-                with open("/home/stormlab/seg/layer_weights/block_%s_layer_%s_weights.npy" %(layer_ind + 4, i), "rb") as fp:   # Unpickling
-                    b = pickle.load(fp)
-                weights_list.extend(b)
+            if pretraining == 'cells':
+                for i in range(0, 5):
+                    with open("/home/stormlab/seg/layer_weights/%s/block_%s_layer_%s_weights.npy" %(pretraining, layer_ind +4, i), "rb") as fp:   # Unpickling
+                        b = pickle.load(fp)
+                    weights_list.extend(b)
+            elif pretraining == 'imagenet':
+                for i in range(0, 4):
+                    with open("/home/stormlab/seg/layer_weights/%s/block_%s_layer_%s_weights.npy" %(pretraining, layer_ind +4, i), "rb") as fp:   # Unpickling
+                        b = pickle.load(fp)
+                    weights_list.extend(b)
             self.UpLayers.append(UpBlock2D(conv_filters, up_factor, data_format, layer_ind, weights_list, pretraining,
                                            return_logits=layer_ind + 1 == len(net_params['up_conv_kernels'])))
             self.last_depth = conv_filters[-1][1]
@@ -213,8 +254,10 @@ class ULSTMnet2D(k.Model):
 #        self.Sigmoid = k.layers.Conv2D(1, 1, 1, use_bias=True, activation = 'sigmoid', data_format=self.data_format_keras, padding='same')
 
     def call(self, inputs, training=None, mask=None):
+#        inputs = k.layers.InputLayer(input_tensor = inputs)
+#        print(inputs.shape)
         input_shape = inputs.shape
-        if self.drop_input:
+        if self.drop_input and training:
             inputs = k.layers.Dropout(self.dropout_rate)(inputs)
         min_pad_value = self.total_stride * int(self.pad_image) if self.pad_image else 0
 
@@ -238,13 +281,21 @@ class ULSTMnet2D(k.Model):
         for down_layer in self.DownLayers:
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
-#        out_skip = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(out_skip)
+        if self.drop_input and training:
+            out_skip = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(out_skip)
         up_input = out_skip
+#        if self.pretraining == 'imagenet':
+#            for layer in self.ConnectLayer:
+#                up_input = layer(up_input)
+#                skip_inputs.append(up_input)
+#                skip_inputs.pop(0)
+                
+                
         skip_inputs.reverse()
         assert len(skip_inputs) == len(self.UpLayers)
         for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
-#            if up_layer == self.last_layer:
-#                up_layer = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(up_layer)
+            if up_layer == self.last_layer and training and self.drop_input:
+                skip_input = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(skip_input)
             up_input = up_layer((up_input, skip_input), training=training, mask=mask)
         logits_output_shape = up_input.shape
         logits_output = tf.reshape(up_input, [input_shape[0], input_shape[1], logits_output_shape[1],

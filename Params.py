@@ -40,7 +40,7 @@ class CTCParams(ParamsBase):
     # -------- Training ----------
     num_iterations = 80000
     validation_interval = 10
-    print_to_console_interval = 10
+    print_to_console_interval = 20
 
     # ---------Save and Restore ----------
     load_checkpoint = False
@@ -53,7 +53,7 @@ class CTCParams(ParamsBase):
 
     # ---------Tensorboard-------------
     tb_sub_folder = 'LSTMUNet'
-    write_to_tb_interval = 10
+    write_to_tb_interval = 20
     save_log_dir = ROOT_SAVE_DIR
 
     # ---------Debugging-------------
@@ -82,8 +82,8 @@ class CTCParams(ParamsBase):
                                                             )
 
 
-#        now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-        now_string = 'HP_tuning_models'
+        now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+#        now_string = 'HP_tuning_models'
         
         #initialization of the various dir folders
         if self.load_checkpoint and self.continue_run:

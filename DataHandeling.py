@@ -27,6 +27,7 @@ class CTCRAMReaderSequence2D(object):
         np.random.seed(1)
         #initialization of the different parts of dataset
         self.valid_list_train, self.valid_list_val, self.valid_list_test, self.metadata = self._dataset_split()
+        self.num_steps_per_epoch = int(np.floor(len(self.valid_list_train)/self.batch_size))
         #create a queue for the testing
         self.q = self.create_queue()
 
@@ -59,7 +60,7 @@ class CTCRAMReaderSequence2D(object):
             metadata = pickle.load(fobj)
         filename_list = metadata['filelist']
         valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
-        return len(valid_masks)
+        return int(np.floor(len(valid_masks)/self.batch_size))
     
     #splits the index of the labeled masks onto different sets for training, validation and test
     def _dataset_split(self):
