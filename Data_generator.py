@@ -9,23 +9,23 @@ import functools
 ##data generator that uses threads in order to create continuosly a batch of images with shape(batch_size, unirll_length, reshape_size)
 
 
-class threadsafe_iterator(object):
-    def __init__(self, iterator):
-        self.iterator = iterator
-        self.lock = threading.Lock()
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        with self.lock:
-            return next(self.iterator)
-
-def threadsafe_generator(func):
-    @functools.wraps(func)
-    def gen(*a, **kw):
-        return threadsafe_iterator(func(*a, **kw))
-    return gen
+#class threadsafe_iterator(object):
+#    def __init__(self, iterator):
+#        self.iterator = iterator
+#        self.lock = threading.Lock()
+#
+#    def __iter__(self):
+#        return self
+#
+#    def __next__(self):
+#        with self.lock:
+#            return next(self.iterator)
+#
+#def threadsafe_generator(func):
+#    @functools.wraps(func)
+#    def gen(*a, **kw):
+#        return threadsafe_iterator(func(*a, **kw))
+#    return gen
 
 class DataSet():
 
@@ -51,10 +51,10 @@ class DataSet():
         np.random.seed(1)# max number of frames a video can have for us to use it
 
 
-    @threadsafe_generator
+#    @threadsafe_generator
     #in this method the sequences are piled into batch 
     def frame_generator(self):
-        while 1:
+        while True:
             image_batch, seg_batch = [], []
             for _ in range(0, self.batch_size):
                 sample = random.choice(self.filelist_ind)
@@ -62,7 +62,7 @@ class DataSet():
                 image_batch.append(sequence_image)
                 seg_batch.append(sequence_seg)
             print((np.expand_dims(np.array(image_batch), -1)).shape)
-            yield (np.expand_dims(np.array(image_batch), -1), np.expand_dims(np.array(seg_batch), -1))
+            yield np.expand_dims(np.array(image_batch), -1), np.expand_dims(np.array(seg_batch), -1)
             
     @staticmethod
     def _adjust_brightness_(image, delta):
@@ -149,4 +149,4 @@ class DataSet():
             sequence_seg.append(seg)
             
         
-        return (sequence_image, sequence_seg)
+        return sequence_image, sequence_seg

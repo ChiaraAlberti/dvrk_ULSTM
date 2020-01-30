@@ -24,9 +24,10 @@ class CTCRAMReaderSequence2D(object):
         self.height_shift_range = 0.1
         self.used_masks_train = []
         self.used_masks_val = []
+        self.mode = 'random'
         np.random.seed(1)
         #initialization of the different parts of dataset
-        self.valid_list_train, self.valid_list_val, self.valid_list_test, self.metadata = self._dataset_split()
+        self.valid_list_train, self.valid_list_val, self.valid_list_test, self.metadata = self._dataset_split(self.mode)
         self.num_steps_per_epoch = int(np.floor(len(self.valid_list_train)/self.batch_size))
         #create a queue for the testing
         self.q = self.create_queue()
@@ -62,15 +63,30 @@ class CTCRAMReaderSequence2D(object):
         valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
         return int(np.floor(len(valid_masks)/self.batch_size))
     
-    #splits the index of the labeled masks onto different sets for training, validation and test
-    def _dataset_split(self):
+    #splits the index of the labeled masks into different sets for training, validation and test
+    def _dataset_split(self, mode):
         sequence_folder = self.sequence_folder
         with open(os.path.join(sequence_folder, 'full_csv_prova.pkl'), 'rb') as fobj:
             metadata = pickle.load(fobj)
         filename_list = metadata['filelist']
         valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
-        valid_list_training, valid_list_test = train_test_split(valid_masks, test_size= 0.2)
-        valid_list_train, valid_list_val = train_test_split(valid_list_training, test_size= 0.2)
+        if mode == 'random':
+            valid_list_training, valid_list_test = train_test_split(valid_masks, test_size= 0.1)
+            valid_list_train, valid_list_val = train_test_split(valid_list_training, test_size= 0.1)
+        elif mode == 'ordered':
+            valid_list_training = valid_masks[int(round(0.1*len(valid_masks))):]
+            valid_list_test = valid_masks[:int(round(0.1*len(valid_masks)))]
+            valid_list_train = valid_list_training[int(round(0.1*len(valid_list_training))):]
+            valid_list_val = valid_list_training[:int(round(0.1*len(valid_list_training)))]
+        elif mode == 'by_batch':
+            list_batch = []
+            n = int(np.floor(len(valid_masks)*0.1))
+            for i in range(0, len(valid_masks), n):
+                list_batch.append(valid_masks[i:i + n])
+            random.shuffle(list_batch) 
+            valid_list_train = [item for sublist in list_batch[2:] for item in sublist]
+            valid_list_val = list_batch[0]
+            valid_list_test = list_batch[1]                   
         return valid_list_train, valid_list_val, valid_list_test, metadata
     
     #create the batch of images and apply data augmentation

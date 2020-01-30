@@ -254,8 +254,6 @@ class ULSTMnet2D(k.Model):
 #        self.Sigmoid = k.layers.Conv2D(1, 1, 1, use_bias=True, activation = 'sigmoid', data_format=self.data_format_keras, padding='same')
 
     def call(self, inputs, training=None, mask=None):
-#        inputs = k.layers.InputLayer(input_tensor = inputs)
-#        print(inputs.shape)
         input_shape = inputs.shape
         if self.drop_input and training:
             inputs = k.layers.Dropout(self.dropout_rate)(inputs)

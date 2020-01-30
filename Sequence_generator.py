@@ -37,7 +37,7 @@ class DataGenerator(Sequence):
         indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
         list_IDs_temp = [self.list_IDs[k] for k in indexes]
         # Generate data
-        all_images, all_seg = self.__iter__(list_IDs_temp)
+        all_images, all_seg = self.__data_generation(list_IDs_temp)
 #        print('Image', all_images.shape)
 #        print('Seg', all_seg.shape)
         return all_images, all_seg
@@ -60,7 +60,7 @@ class DataGenerator(Sequence):
         return out_img
     
     #Generates data containing batch_size*unroll_length samples and perform data_augmentation
-    def __iter__(self, list_IDs_temp):
+    def __data_generation(self, list_IDs_temp):
         image_batch = np.zeros((self.batch_size, self.unroll_len, *self.reshape_size, 1))
         seg_batch = np.zeros((self.batch_size, self.unroll_len, *self.reshape_size, 1))
 
@@ -132,6 +132,5 @@ class DataGenerator(Sequence):
                 
                 image_batch[i, j] = img_crop
                 seg_batch[i, j] = seg_crop
-
 
         return image_batch, seg_batch

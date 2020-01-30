@@ -6,18 +6,19 @@ import pickle
 import Networks as Nets
 import Params
 import tensorflow as tf
-from Sequence_generator import DataGenerator
+#from Sequence_generator import DataGenerator
+from Data_generator import DataSet
 import sys
 from utils import log_print
 import cv2
 from tensorflow.python.keras import losses
 import time 
 import numpy as np
-import pandas as pd
 from netdict import Net_type
 import csv 
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+#from keras.preprocessing.sequence import TimeseriesGenerator
 
 
 try:
@@ -26,6 +27,7 @@ try:
 except AttributeError:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
     import tensorflow.keras as k
+
 
 METRICS = [
       k.metrics.TruePositives(name='tp'),
@@ -64,20 +66,12 @@ class LossFunction:
         return loss
 
     def bce_dice_loss(self, y_true, y_pred):
-        valid  = np.zeros((y_true.shape)).astype(np.float32)
-        valid[:, -1] = 1
-#        y_true = y_true * valid
-#        y_pred = y_pred * valid
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
         bce_loss = losses.binary_crossentropy(y_true, y_pred)
         dice_loss = self.dice_loss(y_true, y_pred)
         loss = bce_loss + dice_loss
-#        y_true = y_true * valid
-#        y_pred = y_pred * valid
-#        loss = loss * valid
-#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(valid) + 0.00001)
-        return loss, dice_loss, bce_loss
+        return loss
     
 
 def train():
@@ -90,7 +84,7 @@ def train():
         l1 = 0
         l2 = 0
         kernel_init = 'he_normal'
-        net_type = 'cpu_net'
+        net_type = 'original_net'
         lr = 0.0005
         lr_decay = 0.96
 
@@ -98,9 +92,9 @@ def train():
         net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
         model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input)
         
-        inputs = tf.keras.Input(shape=[params.unroll_len, params.reshape_size[0], params.reshape_size[1], 1])
-        outputs = model(inputs)
-        model_keras = tf.keras.Model(inputs=inputs, outputs=outputs)
+        inputs = tf.keras.Input(shape=[params.unroll_len, params.reshape_size[0], params.reshape_size[1], 1], batch_size=params.batch_size)
+        sigmoid = model(inputs)
+        model_keras = tf.keras.Model(inputs=inputs, outputs=sigmoid)
 
         # Losses and Metrics
         loss_fn = LossFunction()
@@ -174,15 +168,19 @@ def train():
             valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
             valid_list_train, valid_list_val = train_test_split(valid_masks, test_size= 0.2)
             partition = {'train': valid_list_train, 'validation': valid_list_val}
-            data_training = DataGenerator(partition['train'], filename_list, sequence_folder, **parameter)
-            data_validation = DataGenerator(partition['validation'], filename_list, sequence_folder, **parameter)
-#            train_generator = data_training.frame_generator()
-#            val_generator = data_validation.frame_generator()
+#            data_training = TimeseriesGenerator(partition['train'], np.linspace(0, len(partition['train']), len(partition['train'])), length=params.unroll_len, batch_size=params.batch_size)
+#            data_validation = TimeseriesGenerator(partition['validation'], np.linspace(0, len(partition['validation']), len(partition['validation'])), length=params.unroll_len, batch_size=params.batch_size)
+#            data_training = DataGenerator(partition['train'], filename_list, sequence_folder, **parameter)
+#            data_validation = DataGenerator(partition['validation'], filename_list, sequence_folder, **parameter)
+            data_training = DataSet(partition['train'], filename_list, sequence_folder, **parameter)
+            data_validation = DataSet(partition['validation'], filename_list, sequence_folder, **parameter)
+            train_generator = data_training.frame_generator()
+            val_generator = data_validation.frame_generator()
             steps = int(np.floor(len(partition['train'])/params.batch_size))
             val_steps = int(np.floor(len(partition['validation'])/params.batch_size))
-            model_keras.compile(optimizer=optimizer, loss=loss_fn, metrics= METRICS)
-            history = model_keras.fit(x=data_training,verbose=1, callbacks=[tb, cp], validation_data=data_validation, 
-                                          steps_per_epoch=steps, validation_steps = val_steps, epochs= 200)
+            model_keras.compile(optimizer=optimizer, loss=loss_fn.bce_dice_loss, metrics= METRICS)
+            history = model_keras.fit(x = train_generator,verbose=1, callbacks=[tb, cp], validation_data=val_generator, 
+                                steps_per_epoch=steps, validation_steps = val_steps, epochs= 200)
 #                show_dataset_labels(image_sequence, seg_sequence)
             
             
