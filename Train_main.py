@@ -99,7 +99,7 @@ class WeightedLoss():
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
         loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 0.667)
-#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
+        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
         return loss
 
 class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
@@ -110,7 +110,7 @@ class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
         self.best_weights = None
         self.wait = 0
         # The epoch the training stops at.
-        self.stopped_epoch = 0
+        self.stopped_step = 0
         # Initialize the best as infinity.
         self.best = np.Inf
         self.stop = False
@@ -132,8 +132,9 @@ class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
         return self.stop, actual_model
 
     def on_train_end(self):
-        if self.stopped_epoch > 0:
+        if self.stopped_step > 0:
             print('Step %05d: early stopping' % (self.stopped_step + 1))
+        return self.stopped_step
 
 
 def train():
@@ -143,26 +144,26 @@ def train():
         #Initialization of the data
         data_provider = params.data_provider
         #Initialization of the model 
-        dropout = 0
-        drop_input = True
+        dropout = 0.2
+        drop_input = False
         l1 = 0
         l2 = 0
         kernel_init = 'he_normal'
         net_type = 'cpu_net'
-        pretraining = False
+        pretraining = 'cells'
         if not pretraining:
             lrate = 0.0001
+            lr_decay = 0.005
         else:
             lrate  = 0.0001
-        lr_decay = 0.01
+            lr_decay = 0.005
         pretraining_type = 'full'
         patience = 100
-#        data_provider.mode = 'ciao'
         
         net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining)
-        if pretraining == 'cells':
-            model = TrainableLayers(model, pretraining_type)
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining, pretraining_type)
+#        if pretraining == 'cells':
+#            model = TrainableLayers(model, pretraining_type)
 
         #Initialization of Losses and Metrics
 #        loss_fn = LossFunction()
@@ -272,7 +273,7 @@ def train():
             test_summary_writer = tf.summary.create_file_writer(test_log_dir)
             
             train_scalars_dict = {'Loss': train_loss,'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
-            val_scalars_dict = {'Loss': val_loss, 'LUT values': val_metrics[0:4]*params.validation_interval, 'Model evaluation': val_metrics[4:7]}
+            val_scalars_dict = {'Loss': val_loss, 'LUT values': val_metrics[0:4], 'Model evaluation': val_metrics[4:7]}
             test_scalars_dict = {'Loss': test_loss, 'LUT values': test_metrics[0:4], 'Model evaluation': test_metrics[4:7]}
 
         #write the values in tensorboard
@@ -340,6 +341,7 @@ def train():
             val_imgs_dict = {}
             test_imgs_dict = {}
             minimum_found = False
+            stopping_step = None
             
             #iterate along the number of iterations
             for _ in range(int(ckpt.step), params.num_iterations + 1):
@@ -409,7 +411,7 @@ def train():
                         stop, best_model = early_stopping.step_end(ckpt.step, val_loss, model)
                     
                     if stop :
-                        early_stopping.on_train_end()
+                        stopping_step = early_stopping.on_train_end()
                         log_print('Saving Best Model of inference:')
                         model_fname = os.path.join(params.experiment_save_dir, 'best_model.ckpt')
                         best_model.save_weights(model_fname, save_format='tf')
@@ -506,7 +508,7 @@ def train():
                 #save parameters values and final loss and precision values 
                 with open(os.path.join(params.experiment_save_dir, 'params_list.csv'), 'w') as fobj:
                     writer = csv.writer(fobj)
-                    model_dict = {'Dropout': dropout, 'Drop_input': drop_input, 'L1': l1, 'L2': l2, 
+                    model_dict = {'Pretraining': pretraining, 'Mode': pretraining_type, 'Stopping_step': stopping_step, 'Dropout': dropout, 'Drop_input': drop_input, 'L1': l1, 'L2': l2, 
                                   'Kernel init': kernel_init, 'Net type': net_type, 'Learning rate': lrate, 
                                   'Lr decay': lr_decay}
                     model_dict.update({'Train_loss': final_train_loss, 'Train_precision': final_train_prec,

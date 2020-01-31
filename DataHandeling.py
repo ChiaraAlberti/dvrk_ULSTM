@@ -30,7 +30,7 @@ class CTCRAMReaderSequence2D(object):
         self.valid_list_train, self.valid_list_val, self.valid_list_test, self.metadata = self._dataset_split(self.mode)
         self.num_steps_per_epoch = int(np.floor(len(self.valid_list_train)/self.batch_size))
         #create a queue for the testing
-        self.q = self.create_queue()
+        self.q, self.q_best = self.create_queue()
 
 
     @staticmethod
@@ -216,16 +216,24 @@ class CTCRAMReaderSequence2D(object):
 
     def create_queue(self):
         q = tf.queue.FIFOQueue(len(self.valid_list_test), dtypes = tf.float32, shapes = ())
-        return q
+        q_best = tf.queue.FIFOQueue(len(self.valid_list_test), dtypes = tf.float32, shapes = ())
+        return q, q_best
     
     #enqueue the index of the test sets    
-    def enqueue_index(self):
-        for i in range(0, len(self.valid_list_test)):
-            self.q.enqueue(self.valid_list_test[i])
+    def enqueue_index(self, type_test):
+        if type_test == 'best_test':
+            for i in range(0, len(self.valid_list_test)):
+                self.q_best.enqueue(self.valid_list_test[i])
+        else:
+            for i in range(0, len(self.valid_list_test)):
+                self.q.enqueue(self.valid_list_test[i])
     
     #read the images in order to test     
-    def read_new_image(self):
-        index = self.q.dequeue_many(self.batch_size)
+    def read_new_image(self, type_test):
+        if type_test == 'best_test':
+            index = self.q_best.dequeue_many(self.batch_size)
+        else:
+            index = self.q.dequeue_many(self.batch_size)
 
         image_seq = []
         seg_seq = []

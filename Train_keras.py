@@ -6,8 +6,8 @@ import pickle
 import Networks as Nets
 import Params
 import tensorflow as tf
-#from Sequence_generator import DataGenerator
-from Data_generator import DataSet
+from Sequence_generator import DataGenerator
+#from Data_generator import DataSet
 import sys
 from utils import log_print
 import cv2
@@ -23,7 +23,7 @@ from sklearn.model_selection import train_test_split
 
 try:
     # noinspection PyPackageRequirements
-    import tensorflow.python.keras as k
+    import tensorflow.keras as k
 except AttributeError:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
     import tensorflow.keras as k
@@ -93,8 +93,8 @@ def train():
         model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input)
         
         inputs = tf.keras.Input(shape=[params.unroll_len, params.reshape_size[0], params.reshape_size[1], 1], batch_size=params.batch_size)
-        sigmoid = model(inputs)
-        model_keras = tf.keras.Model(inputs=inputs, outputs=sigmoid)
+        sigmoid, output = model(inputs)
+        model_keras = tf.keras.Model(inputs=inputs, outputs=[sigmoid, output])
 
         # Losses and Metrics
         loss_fn = LossFunction()
@@ -170,16 +170,16 @@ def train():
             partition = {'train': valid_list_train, 'validation': valid_list_val}
 #            data_training = TimeseriesGenerator(partition['train'], np.linspace(0, len(partition['train']), len(partition['train'])), length=params.unroll_len, batch_size=params.batch_size)
 #            data_validation = TimeseriesGenerator(partition['validation'], np.linspace(0, len(partition['validation']), len(partition['validation'])), length=params.unroll_len, batch_size=params.batch_size)
-#            data_training = DataGenerator(partition['train'], filename_list, sequence_folder, **parameter)
-#            data_validation = DataGenerator(partition['validation'], filename_list, sequence_folder, **parameter)
-            data_training = DataSet(partition['train'], filename_list, sequence_folder, **parameter)
-            data_validation = DataSet(partition['validation'], filename_list, sequence_folder, **parameter)
-            train_generator = data_training.frame_generator()
-            val_generator = data_validation.frame_generator()
+            data_training = DataGenerator(partition['train'], filename_list, sequence_folder, **parameter)
+            data_validation = DataGenerator(partition['validation'], filename_list, sequence_folder, **parameter)
+#            data_training = DataSet(partition['train'], filename_list, sequence_folder, **parameter)
+#            data_validation = DataSet(partition['validation'], filename_list, sequence_folder, **parameter)
+#            train_generator = data_training.frame_generator()
+#            val_generator = data_validation.frame_generator()
             steps = int(np.floor(len(partition['train'])/params.batch_size))
             val_steps = int(np.floor(len(partition['validation'])/params.batch_size))
-            model_keras.compile(optimizer=optimizer, loss=loss_fn.bce_dice_loss, metrics= METRICS)
-            history = model_keras.fit(x = train_generator,verbose=1, callbacks=[tb, cp], validation_data=val_generator, 
+            model_keras.compile(optimizer=optimizer, loss=[loss_fn.bce_dice_loss, None], metrics= METRICS)
+            history = model_keras.fit(x = data_training,verbose=1, callbacks=[tb, cp], validation_data=data_validation, 
                                 steps_per_epoch=steps, validation_steps = val_steps, epochs= 200)
 #                show_dataset_labels(image_sequence, seg_sequence)
             

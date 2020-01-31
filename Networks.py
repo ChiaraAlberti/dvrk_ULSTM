@@ -115,7 +115,7 @@ class DownBlock2D(k.Model):
 
 class UpBlock2D(k.Model):
 
-    def __init__(self, kernels: List[tuple], up_factor=2, data_format='NHWC',  layer_ind_up = 0, weights_list = 0, pretraining =False, return_logits=False):
+    def __init__(self, kernels: List[tuple], up_factor=2, data_format='NHWC',  layer_ind_up = 0, weights_list = 0, pretraining =False, pretraining_type = 'full', return_logits=False):
         super(UpBlock2D, self).__init__()
         self.data_format_keras = 'channels_first' if data_format[1] == 'C' else 'channels_last'
         self.up_factor = up_factor
@@ -127,7 +127,7 @@ class UpBlock2D(k.Model):
         self.pretraining = pretraining
         
         for l_ind, (kxy, kout, dropout, reg, kernel_init) in enumerate(kernels):
-            if self.pretraining == 'cells':
+            if self.pretraining == 'cells' and pretraining_type =='full':
                 C = tf.keras.initializers.Constant
                 if layer_ind_up ==3:
                     if l_ind != 2:
@@ -189,7 +189,7 @@ class UpBlock2D(k.Model):
 
 
 class ULSTMnet2D(k.Model):
-    def __init__(self, net_params=None, data_format='NHWC', pad_image=True, drop_input= False, pretraining = False):
+    def __init__(self, net_params=None, data_format='NHWC', pad_image=True, drop_input= False, pretraining = False, pretraining_type = 'full'):
         super(ULSTMnet2D, self).__init__()
         self.data_format_keras = 'channels_first' if data_format[1] == 'C' else 'channels_last'
         self.channel_axis = 1 if data_format[1] == 'C' else -1
@@ -246,7 +246,7 @@ class ULSTMnet2D(k.Model):
                     with open("/home/stormlab/seg/layer_weights/%s/block_%s_layer_%s_weights.npy" %(pretraining, layer_ind +4, i), "rb") as fp:   # Unpickling
                         b = pickle.load(fp)
                     weights_list.extend(b)
-            self.UpLayers.append(UpBlock2D(conv_filters, up_factor, data_format, layer_ind, weights_list, pretraining,
+            self.UpLayers.append(UpBlock2D(conv_filters, up_factor, data_format, layer_ind, weights_list, pretraining, pretraining_type,
                                            return_logits=layer_ind + 1 == len(net_params['up_conv_kernels'])))
             self.last_depth = conv_filters[-1][1]
             self.last_layer = conv_filters[-1]

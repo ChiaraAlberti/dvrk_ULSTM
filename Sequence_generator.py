@@ -5,7 +5,7 @@ import random
 import cv2
 import os
 import scipy
-from tensorflow.keras.utils import Sequence
+from tensorflow.python.keras.utils import Sequence
 
 class DataGenerator(Sequence):
     'Generates data for Keras'
@@ -38,8 +38,8 @@ class DataGenerator(Sequence):
         list_IDs_temp = [self.list_IDs[k] for k in indexes]
         # Generate data
         all_images, all_seg = self.__data_generation(list_IDs_temp)
-#        print('Image', all_images.shape)
-#        print('Seg', all_seg.shape)
+        print('Image', all_images.shape)
+        print('Seg', all_seg.shape)
         return all_images, all_seg
 
     #Updates indexes after each epoch if shuffle is True
