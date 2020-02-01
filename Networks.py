@@ -197,7 +197,7 @@ class ULSTMnet2D(k.Model):
         self.UpLayers = []
         self.ConnectLayer = []
         self.total_stride = 1
-        self.dropout_rate = 0.2
+        self.dropout_rate = 0.3
         self.drop_input = drop_input
         self.pad_image = pad_image
         self.pretraining = pretraining

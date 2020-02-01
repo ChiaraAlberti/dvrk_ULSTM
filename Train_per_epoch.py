@@ -18,7 +18,7 @@ from tensorflow.python.keras import losses
 import time 
 import numpy as np
 from netdict import Net_type
-from netdict import TrainableLayers
+#from netdict import TrainableLayers
 import csv 
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -111,44 +111,10 @@ class WeightedLoss():
     def loss(self, y_true, y_pred):
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
-        loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 0.667)
+        loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 0.7)
 #        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
         return loss
 
-class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
-    
-    def __init__(self, patience=0):
-        self.patience = patience
-        # best_weights to store the weights at which the minimum loss occurs.
-        self.best_weights = None
-        self.wait = 0
-        # The epoch the training stops at.
-        self.stopped_epoch = 0
-        # Initialize the best as infinity.
-        self.best = np.Inf
-        self.stop = False
-
-    def step_end(self, epoch, val_loss, actual_model):
-        current = np.array(val_loss.result())
-        if np.less(current, self.best):
-            self.best = current
-            self.wait = 0
-            # Record the best weights if current results is better (less).
-            self.best_weights = actual_model.get_weights()
-        else:
-            self.wait += 1
-            if self.wait >= self.patience:
-                self.stopped_epoch = epoch
-                print('Restoring model weights from the end of the best epoch.')
-                actual_model.set_weights(self.best_weights)
-                self.stop = True
-        print(self.wait)
-        return self.stop, actual_model
-
-    def on_train_end(self):
-        if self.stopped_epoch > 0:
-            print('Epoch %05d: early stopping' % (self.stopped_epoch + 1))
-        return self.stopped_epoch
         
 
 def train():
@@ -158,13 +124,13 @@ def train():
         #Initialization of the data
         data_provider = params.data_provider
         #Initialization of the model 
-        dropout = 0.2
-        drop_input = False
+        dropout = 0
+        drop_input = True
         l1 = 0
         l2 = 0
         kernel_init = 'he_normal'
         net_type = 'cpu_net'
-        pretraining = 'cells'
+        pretraining = False
         if not pretraining:
             lrate = 0.0001
             lr_decay = 0.005
@@ -174,7 +140,7 @@ def train():
         pretraining_type = 'full'
         step_per_epoch = data_provider.num_steps_per_epoch
         num_epoch = 0
-        patience = 200
+        patience = 500
         
         net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
         model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining, pretraining_type)
@@ -204,13 +170,46 @@ def train():
                 decay_rate=lr_decay, 
                 staircase=True)
         
+        class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
+    
+            def __init__(self, patience=0):
+                self.patience = patience
+                # best_weights to store the weights at which the minimum loss occurs.
+                self.best_weights = None
+                self.wait = 0
+                # The epoch the training stops at.
+                self.stopped_epoch = 0
+                # Initialize the best as infinity.
+                self.best = np.Inf
+                self.stop = False
+        
+            def step_end(self, epoch, val_loss):
+                current = np.array(val_loss.result())
+                if np.less(current, self.best):
+                    self.best = current
+                    self.wait = 0
+                    # Record the best weights if current results is better (less).
+                    self.best_weights = model.get_weights()
+                else:
+                    self.wait += 1
+                    if self.wait >= self.patience:
+                        self.stopped_epoch = epoch
+#                        print('Restoring model weights from the end of the best epoch.')
+#                        model.set_weights(self.best_weights)
+                        self.stop = True
+                return self.stop, self.best_weights
+        
+            def on_train_end(self):
+                if self.stopped_epoch > 0:
+                    print('Epoch %05d: early stopping' % (self.stopped_epoch + 1))
+                return self.stopped_epoch
+        
         #Adam optimizer
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 #        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lrate)
         
         #Checkpoint 
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
-        
         #Early Stopping callback
         early_stopping = EarlyStoppingAtMinLoss(patience)
         
@@ -237,6 +236,7 @@ def train():
         manager = tf.train.CheckpointManager(ckpt, os.path.join(params.experiment_save_dir, 'tf_ckpts'),
                                              max_to_keep=params.save_checkpoint_max_to_keep,
                                              keep_checkpoint_every_n_hours=params.save_checkpoint_every_N_hours)
+        
 
         @tf.function
         def train_step(image, label): 
@@ -315,7 +315,7 @@ def train():
             val_scalars_dict = {'Loss': val_loss, 'LUT values': val_metrics[0:4], 'Model evaluation': val_metrics[4:7]}
             test_scalars_dict = {'Loss': test_loss, 'LUT values': test_metrics[0:4], 'Model evaluation': test_metrics[4:7]}
             best_test_scalars_dict = {'Loss': best_test_loss, 'LUT values': best_test_metrics[0:4], 'Model evaluation': best_test_metrics[4:7]}
-            
+#            
         #write the values in tensorboard
         def tboard(writer, log_dir, step, scalar_loss_dict, images_dict, factor):
             with tf.device('/cpu:0'):
@@ -399,7 +399,7 @@ def train():
 #                show_dataset_labels(image_sequence, seg_sequence)
                 
                 train_output_sequence, train_loss_value= train_step(image_sequence, seg_sequence)    
-                bw_predictions = post_processing(train_output_sequence[:, -1])
+                train_bw_predictions = post_processing(train_output_sequence[:, -1])
                 
                 progbar.update(int(ckpt.step)- num_epoch*step_per_epoch)
                 
@@ -419,14 +419,14 @@ def train():
                                                                    val_seg_sequence)
                     
                     if not minimum_found:
-                        stop, best_model = early_stopping.step_end(num_epoch, val_loss, model)
+                        stop, best_weights = early_stopping.step_end(num_epoch, val_loss)
                     
                     if params.profile:
                         with graph_summary_writer.as_default():
                             tf.summary.trace_export('train_step', step=int(ckpt.step),
                                                     profiler_outdir=params.experiment_log_dir)
                     
-                    bw_predictions = post_processing(val_output_sequence[:, -1])
+                    val_bw_predictions = post_processing(val_output_sequence[:, -1])
                     model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended   
               
                
@@ -445,7 +445,7 @@ def train():
                         train_imgs_dict['Image'] = display_image
                         train_imgs_dict['GT'] = seg_sequence[:, -1]
                         train_imgs_dict['Output'] = train_output_sequence[:, -1]
-                        train_imgs_dict['Output_bw'] = bw_predictions
+                        train_imgs_dict['Output_bw'] = train_bw_predictions
                         tboard(train_summary_writer, train_log_dir, int(ckpt.step), train_scalars_dict, train_imgs_dict, 1)
                         
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))
@@ -471,7 +471,7 @@ def train():
                         val_imgs_dict['Image'] = display_image
                         val_imgs_dict['GT'] = val_seg_sequence[:, -1]
                         val_imgs_dict['Output'] = val_output_sequence[:, -1]
-                        val_imgs_dict['Output_bw'] = bw_predictions
+                        val_imgs_dict['Output_bw'] = val_bw_predictions
                         tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict, params.validation_interval)
                     
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
@@ -495,8 +495,10 @@ def train():
                         log_print("Saved checkpoint for step {}: {}".format(int(ckpt.step), save_path))
                     else:
                         log_print("WARNING: dry_run flag is ON! Mot saving checkpoints or tensorboard data")                 
-                
+#                
                 if stop:
+                    actual_weights = model.get_weights()
+                    model.set_weights(best_weights)
                     stopped_epoch = early_stopping.on_train_end()
                     log_print('Saving Best Model of inference:')
                     model_fname = os.path.join(params.experiment_save_dir, 'best_model.ckpt')
@@ -528,6 +530,8 @@ def train():
                         for i in range(0, 7):
                             best_test_metrics[i].reset_states()
                         best_test_loss.reset_states()
+                    
+                    model.set_weights(actual_weights)
                     
                 #when it comes to the end save the final precisions ans losses AND PERFORM PREDICTION ON NEW SAMPLES
                 if ckpt.step == params.num_iterations:
