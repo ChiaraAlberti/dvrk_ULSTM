@@ -40,7 +40,7 @@ class CTCParams(ParamsBase):
     # -------- Training ----------
     num_iterations = 80000
     validation_interval = 10
-    print_to_console_interval = 20
+    print_to_console_interval = 10
 
     # ---------Save and Restore ----------
     load_checkpoint = False
@@ -53,7 +53,7 @@ class CTCParams(ParamsBase):
 
     # ---------Tensorboard-------------
     tb_sub_folder = 'LSTMUNet'
-    write_to_tb_interval = 20
+    write_to_tb_interval = 10
     save_log_dir = ROOT_SAVE_DIR
 
     # ---------Debugging-------------

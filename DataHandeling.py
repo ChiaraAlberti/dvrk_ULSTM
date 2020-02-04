@@ -189,6 +189,7 @@ class CTCRAMReaderSequence2D(object):
                     
                 img_crop = scipy.ndimage.shift(img_crop, [width_shift_range, height_shift_range])
                 seg_crop = scipy.ndimage.shift(seg_crop, [width_shift_range, height_shift_range])
+                thresh, seg_crop = cv2.threshold(seg_crop,0.5,1,cv2.THRESH_BINARY)
                 
                 image_seq.append(img_crop)
                 seg_seq.append(seg_crop)

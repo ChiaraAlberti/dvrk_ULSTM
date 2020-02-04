@@ -19,6 +19,7 @@ from netdict import Net_type
 import csv 
 import matplotlib.pyplot as plt
 from datetime import datetime
+import math
 
 
 try:
@@ -98,7 +99,7 @@ class LossFunction:
         #select only the images which have the corresponding label
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
-        bce_loss = losses.binary_crossentropy(y_true, y_pred)
+        bce_loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 2)
         dice_loss = self.dice_loss(y_true, y_pred)
         loss = bce_loss + dice_loss
         return loss, bce_loss
@@ -107,10 +108,37 @@ class WeightedLoss():
     def loss(self, y_true, y_pred):
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
-        loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 0.7)
+        loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 1.2)
 #        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
         return loss
 
+
+class JaccardLoss() :   
+    def loss(self, y_true, y_pred):
+        y_true = y_true[:, -1]
+        y_pred = y_pred[:, -1]
+        y_pred = tf.cast(tf.math.greater(y_pred, 0.5), tf.float32)
+        intersection = tf.reduce_sum(tf.abs(y_true * y_pred), axis=-1)
+        sum_ = tf.reduce_sum(tf.abs(y_true) + tf.abs(y_pred), axis=-1)
+        jac = intersection/sum_
+#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
+        return jac
+
+class FocalTverskyLoss():
+    def loss(self, y_true, y_pred):
+#        beta = 4
+        y_true = y_true[:, -1]
+        y_pred = y_pred[:, -1]
+        y_true = tf.reshape(y_true, [-1])
+        y_pred = tf.reshape(y_pred, [-1])
+        mul = tf.reduce_sum(y_true*y_pred) +1
+        rel_true = tf.reduce_sum(y_true*(1-y_pred))
+        rel_pred = tf.reduce_sum(y_pred *(1- y_true))
+#        num = (1+ math.pow(beta,2))*mul
+        den = mul + 0.3*rel_true + (1- 0.3)*rel_pred +1
+        loss = mul/den
+        gamma = 0.75
+        return tf.math.pow((1-loss), gamma)
 
 def train():
    
@@ -119,20 +147,20 @@ def train():
         #Initialization of the data
         data_provider = params.data_provider
         #Initialization of the model 
-        dropout = 0.2
-        drop_input = False
+        dropout = 0
+        drop_input = True
         l1 = 0
         l2 = 0
         kernel_init = 'he_normal'
-        net_type = 'cpu_net'
-        pretraining = 'cells'
+        net_type = 'original_net'
+        pretraining = False
         if not pretraining:
-            lrate = 0.0001
-            lr_decay = 0.005
+            lrate = 0.0005
+            lr_decay = 0.01
         else:
             lrate  = 0.0001
             lr_decay = 0.005
-        pretraining_type = 'full'
+        pretraining_type = 'only_enc'
         patience = 500
         
         net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
@@ -383,6 +411,7 @@ def train():
                 image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train', False, None, None)
 #                show_dataset_labels(image_sequence, seg_sequence)
                 
+                
                 train_output_sequence, train_loss_value= train_step(image_sequence, seg_sequence)    
                 bw_predictions = post_processing(train_output_sequence[:, -1])
                 
@@ -402,7 +431,7 @@ def train():
                         #reset the metrics
 #                        for i in range(0, 4):
 #                            train_metrics[i].reset_states()
-                            
+                        print(np.count_nonzero(seg_sequence[:, -1]))  
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
                         log_print("WARNING: dry_run flag is ON! Not saving checkpoints or tensorboard data")
@@ -504,7 +533,7 @@ def train():
                         best_test_imgs_dict['Image'] = display_image
                         best_test_imgs_dict['GT'] = seg_seq[:, -1]
                         best_test_imgs_dict['Output'] = best_test_output_sequence[:, -1]
-                        tboard(best_test_summary_writer, best_test_log_dir, i, best_test_scalars_dict, best_test_imgs_dict, ckpt.step/(i+1))
+                        tboard(best_test_summary_writer, best_test_log_dir, i, best_test_scalars_dict, best_test_imgs_dict, ckpt.step)
                         log_print('Printed Testing Step: {} to Tensorboard'.format(i))
                         for i in range(0, 7):
                             best_test_metrics[i].reset_states()
