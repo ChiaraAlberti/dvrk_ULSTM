@@ -9,7 +9,7 @@ import pickle
 import Networks as Nets
 import Params
 import tensorflow as tf
-import DataHandeling 
+import DataHandeling
 import sys
 from utils import log_print
 import requests
@@ -84,6 +84,7 @@ class AWSError(Exception):
     pass
 
 #loss function: dice_loss + binary cross entropy loss
+#loss function: dice_loss + binary cross entropy loss
 class LossFunction:
     def dice_coeff(self, y_true, y_pred):
         smooth = 1.
@@ -98,23 +99,52 @@ class LossFunction:
         loss = 1 - self.dice_coeff(y_true, y_pred)
         return loss
 
-    def bce_dice_loss(self, y_true, y_pred):
+    def bce_dice_loss(self, y_true, y_pred, logits):
         #select only the images which have the corresponding label
+        alpha = 0.6
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
-        bce_loss = losses.binary_crossentropy(y_true, y_pred)
+        logits = logits[:, -1]
+        bce_loss = tf.nn.weighted_cross_entropy_with_logits(y_true, logits, 0.8)
         dice_loss = self.dice_loss(y_true, y_pred)
-        loss = bce_loss + dice_loss
-        return loss, bce_loss
+        loss = alpha*bce_loss + (1- alpha)*dice_loss
+        return loss
 
 class WeightedLoss():
     def loss(self, y_true, y_pred):
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
-        loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 0.7)
+        loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 1.2)
 #        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
         return loss
 
+
+class JaccardLoss() :   
+    def loss(self, y_true, y_pred):
+        y_true = y_true[:, -1]
+        y_pred = y_pred[:, -1]
+        y_pred = tf.cast(tf.math.greater(y_pred, 0.5), tf.float32)
+        intersection = tf.reduce_sum(tf.abs(y_true * y_pred), axis=-1)
+        sum_ = tf.reduce_sum(tf.abs(y_true) + tf.abs(y_pred), axis=-1)
+        jac = intersection/sum_
+#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
+        return jac
+
+class FocalTverskyLoss():
+    def loss(self, y_true, y_pred):
+#        beta = 4
+        y_true = y_true[:, -1]
+        y_pred = y_pred[:, -1]
+        y_true = tf.reshape(y_true, [-1])
+        y_pred = tf.reshape(y_pred, [-1])
+        mul = tf.reduce_sum(y_true*y_pred) 
+        rel_true = tf.reduce_sum(y_true*(1-y_pred))
+        rel_pred = tf.reduce_sum(y_pred *(1- y_true))
+#        num = (1+ math.pow(beta,2))*mul
+        den = mul + 0.7*rel_true + (1- 0.7)*rel_pred + 0.00001
+        loss = mul/den
+#        gamma = 0.75
+        return 1-loss #tf.math.pow((1-loss), gamma) 
         
 
 def train():
@@ -129,10 +159,10 @@ def train():
         l1 = 0
         l2 = 0
         kernel_init = 'he_normal'
-        net_type = 'cpu_net'
+        net_type = 'original_net'
         pretraining = False
         if not pretraining:
-            lrate = 0.0001
+            lrate = 0.0005
             lr_decay = 0.005
         else:
             lrate  = 0.0001
@@ -140,7 +170,7 @@ def train():
         pretraining_type = 'full'
         step_per_epoch = data_provider.num_steps_per_epoch
         num_epoch = 0
-        patience = 500
+        patience = 1000
         
         net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
         model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining, pretraining_type)
@@ -148,8 +178,8 @@ def train():
 #            model = TrainableLayers(model, pretraining_type)
 
         #Initialization of Losses and Metrics
-#        loss_fn = LossFunction()
-        loss_fn = WeightedLoss()
+        loss_fn = LossFunction()
+#        loss_fn = WeightedLoss()
         train_loss = k.metrics.Mean(name='train_loss')
         train_metrics = METRICS_TRAIN
         val_loss = k.metrics.Mean(name='val_loss')
@@ -188,12 +218,12 @@ def train():
                 if np.less(current, self.best):
                     self.best = current
                     self.wait = 0
+                    self.stopped_epoch = epoch
                     # Record the best weights if current results is better (less).
                     self.best_weights = model.get_weights()
                 else:
                     self.wait += 1
                     if self.wait >= self.patience:
-                        self.stopped_epoch = epoch
 #                        print('Restoring model weights from the end of the best epoch.')
 #                        model.set_weights(self.best_weights)
                         self.stop = True
@@ -242,7 +272,7 @@ def train():
         def train_step(image, label): 
             with tf.GradientTape() as tape:
                 logits, output = model(image, True)
-                loss = loss_fn.loss(label, logits)
+                loss = loss_fn.bce_dice_loss(label, output, logits)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             ckpt.step.assign_add(1)
@@ -258,7 +288,7 @@ def train():
         @tf.function
         def val_step(image, label):
             logits, output = model(image, False)
-            t_loss = loss_fn.loss(label, logits)
+            t_loss = loss_fn.bce_dice_loss(label, output, logits)
             val_loss(t_loss)
             if params.channel_axis == 1:
                 output = tf.transpose(output, (0, 1, 3, 4, 2))
@@ -271,7 +301,7 @@ def train():
         @tf.function
         def test_step(image, label):
             logits, output = model(image, False)
-            tt_loss = loss_fn.loss(label, logits)
+            tt_loss = loss_fn.bce_dice_loss(label, output, logits)
             test_loss(tt_loss)
             if params.channel_axis == 1:
                 output = tf.transpose(output, (0, 1, 3, 4, 2))
@@ -285,7 +315,7 @@ def train():
         @tf.function
         def best_test_step(image, label):
             logits, output = model(image, False)
-            tt_loss = loss_fn.loss(label, logits)
+            tt_loss = loss_fn.bce_dice_loss(label, output, logits)
             test_loss(tt_loss)
             if params.channel_axis == 1:
                 output = tf.transpose(output, (0, 1, 3, 4, 2))
@@ -525,7 +555,7 @@ def train():
                         best_test_imgs_dict['Image'] = display_image
                         best_test_imgs_dict['GT'] = seg_seq[:, -1]
                         best_test_imgs_dict['Output'] = best_test_output_sequence[:, -1]
-                        tboard(best_test_summary_writer, best_test_log_dir, i, best_test_scalars_dict, best_test_imgs_dict, step_per_epoch/(i+1))
+                        tboard(best_test_summary_writer, best_test_log_dir, i, best_test_scalars_dict, best_test_imgs_dict, step_per_epoch/1)
                         log_print('Printed Testing Step: {} to Tensorboard'.format(i))
                         for i in range(0, 7):
                             best_test_metrics[i].reset_states()
@@ -555,7 +585,7 @@ def train():
                         test_imgs_dict['Image'] = display_image
                         test_imgs_dict['GT'] = seg_seq[:, -1]
                         test_imgs_dict['Output'] = test_output_sequence[:, -1]
-                        tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict, step_per_epoch/(i+1))
+                        tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict, step_per_epoch/1)
                         log_print('Printed Testing Step: {} to Tensorboard'.format(i))
                         for i in range(0, 7):
                             test_metrics[i].reset_states()

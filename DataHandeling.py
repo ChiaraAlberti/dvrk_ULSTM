@@ -30,7 +30,7 @@ class CTCRAMReaderSequence2D(object):
         self.valid_list_train, self.valid_list_val, self.valid_list_test, self.metadata = self._dataset_split(self.mode)
         self.num_steps_per_epoch = int(np.floor(len(self.valid_list_train)/self.batch_size))
         #create a queue for the testing
-        self.q, self.q_best = self.create_queue()
+        self.q, self.q_best, self.q_train, self.q_val = self.create_queue()
 
 
     @staticmethod
@@ -88,6 +88,13 @@ class CTCRAMReaderSequence2D(object):
             valid_list_val = list_batch[0]
             valid_list_test = list_batch[1]                   
         return valid_list_train, valid_list_val, valid_list_test, metadata
+    
+    def create_queue(self):
+        q = tf.queue.FIFOQueue(len(self.valid_list_test), dtypes = tf.float32, shapes = ())
+        q_best = tf.queue.FIFOQueue(len(self.valid_list_test), dtypes = tf.float32, shapes = ())
+        q_train = tf.queue.FIFOQueue(len(self.valid_list_train), dtypes = tf.float32, shapes = ())
+        q_val = tf.queue.FIFOQueue(len(self.valid_list_val), dtypes = tf.float32, shapes = ())
+        return q, q_best, q_train, q_val
     
     #create the batch of images and apply data augmentation
     def read_batch(self, flag, kfold, train_index, test_index):
@@ -153,7 +160,7 @@ class CTCRAMReaderSequence2D(object):
     
             for j in range (0, self.unroll_len):
 
-                img = cv2.imread(os.path.join(self.sequence_folder, 'train', self.metadata['filelist'][batch_index[i] - (self.unroll_len - j - 1)*jump][0]), -1)
+                img = cv2.imread(os.path.join(self.sequence_folder, 'train_new', self.metadata['filelist'][batch_index[i] - (self.unroll_len - j - 1)*jump][0]), -1)
                 img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
                 if img is None:
                     raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.metadata['filelist'][batch_index[i] - (self.unroll_len - j -1)*jump][0])))
@@ -215,10 +222,6 @@ class CTCRAMReaderSequence2D(object):
     def num_test(self):
         return int(np.floor(len(self.valid_list_test) / self.batch_size))
 
-    def create_queue(self):
-        q = tf.queue.FIFOQueue(len(self.valid_list_test), dtypes = tf.float32, shapes = ())
-        q_best = tf.queue.FIFOQueue(len(self.valid_list_test), dtypes = tf.float32, shapes = ())
-        return q, q_best
     
     #enqueue the index of the test sets    
     def enqueue_index(self, type_test):
@@ -250,7 +253,7 @@ class CTCRAMReaderSequence2D(object):
                 seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.metadata['filelist'][index[j]][1]), -1)
                 seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
                 seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
-            
+                thresh, seg = cv2.threshold(seg,0.5,1,cv2.THRESH_BINARY)
             image_seq.append(img)
             seg_seq.append(seg)
         

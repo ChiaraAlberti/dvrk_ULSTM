@@ -27,7 +27,7 @@ def threadsafe_generator(func):
         return threadsafe_iterator(func(*a, **kw))
     return gen
 
-class DataSet():
+class DataSet:
 
     def __init__(self,  filelist_ind, filename, sequence_folder, shuffle = False, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7,batch_size=4,
                  data_format='NCHW', randomize=True):
