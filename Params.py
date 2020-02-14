@@ -38,8 +38,8 @@ class CTCParams(ParamsBase):
 
 
     # -------- Training ----------
-    num_iterations = 10000
-    validation_interval = 9
+    num_iterations = 30000
+    validation_interval = 8
     print_to_console_interval = 10
 
     # ---------Save and Restore ----------

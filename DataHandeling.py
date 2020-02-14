@@ -6,6 +6,8 @@ import numpy as np
 import pickle
 import scipy
 from sklearn.model_selection import train_test_split
+from skimage import transform
+import imgaug.augmenters as iaa
 
 class CTCRAMReaderSequence2D(object):
     def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, batch_size=4,
@@ -72,7 +74,7 @@ class CTCRAMReaderSequence2D(object):
         valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
         if mode == 'random':
             valid_list_training, valid_list_test = train_test_split(valid_masks, test_size= 0.1)
-            valid_list_train, valid_list_val = train_test_split(valid_list_training, test_size= 0.1)
+            valid_list_train, valid_list_val = train_test_split(valid_list_training, test_size= 0.2)
         elif mode == 'ordered':
             valid_list_training = valid_masks[int(round(0.1*len(valid_masks))):]
             valid_list_test = valid_masks[:int(round(0.1*len(valid_masks)))]
@@ -149,8 +151,12 @@ class CTCRAMReaderSequence2D(object):
             crop_x_stop = crop_x + self.sub_seq_size[1]
             flip = np.random.randint(0, 2, 2) if self.randomize else [0, 0]
             rotate = np.random.randint(0, 4) if self.randomize else 0
+            dir_seq = random.choice(['forward', 'backward'])
+#            dir_seq = 'backward'
 #            jump = np.random.randint(1,4) if self.randomize else 1
             jump = 1 
+#            shear_matrix = transform.AffineTransform(shear=np.random.uniform(-0.3,0.3))
+            perspective = iaa.PerspectiveTransform(scale=(0.01, 0.15))
             
             if self.width_shift_range or self.height_shift_range:
                 if self.width_shift_range:
@@ -159,18 +165,30 @@ class CTCRAMReaderSequence2D(object):
                     height_shift_range = random.uniform(-self.height_shift_range * img_size[1], self.height_shift_range * img_size[1])
     
             for j in range (0, self.unroll_len):
-
-                img = cv2.imread(os.path.join(self.sequence_folder, 'train_new', self.metadata['filelist'][batch_index[i] - (self.unroll_len - j - 1)*jump][0]), -1)
+                if dir_seq == 'backward':
+                    img = cv2.imread(os.path.join(self.sequence_folder, 'train_new', self.metadata['filelist'][batch_index[i] - (self.unroll_len - j - 1)*jump][0]), -1)
+                    if img is None:
+                        raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.metadata['filelist'][batch_index[i] - (self.unroll_len - j -1)*jump][0])))
+                    if self.metadata['filelist'][batch_index[i]- (self.unroll_len - j - 1)*jump][1] == 'None':
+                        seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
+                    else:
+                        seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.metadata['filelist'][batch_index[i] - (self.unroll_len - j - 1)*jump][1]), -1)
+                        seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
+                        seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                else: 
+                    img = cv2.imread(os.path.join(self.sequence_folder, 'train_new', self.metadata['filelist'][batch_index[i] + (self.unroll_len - j - 1)*jump][0]), -1)
+                    if img is None:
+                        raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.metadata['filelist'][batch_index[i] + (self.unroll_len - j -1)*jump][0])))
+                    if self.metadata['filelist'][batch_index[i] + (self.unroll_len - j - 1)*jump][1] == 'None':
+                        seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
+                    else:
+                        seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.metadata['filelist'][batch_index[i] + (self.unroll_len - j - 1)*jump][1]), -1)
+                        seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
+                        seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                
                 img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
-                if img is None:
-                    raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.metadata['filelist'][batch_index[i] - (self.unroll_len - j -1)*jump][0])))
                 img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
-                if self.metadata['filelist'][batch_index[i]- (self.unroll_len - j - 1)*jump][1] == 'None':
-                    seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
-                else:
-                    seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.metadata['filelist'][batch_index[i] - (self.unroll_len - j - 1)*jump][1]), -1)
-                    seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
-                    seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                
                 
                 img_crop = img[crop_y:crop_y_stop, crop_x:crop_x_stop]
                 img_max = img_crop.max()
@@ -193,7 +211,11 @@ class CTCRAMReaderSequence2D(object):
                 if rotate > 0:
                     img_crop = np.rot90(img_crop, rotate)
                     seg_crop = np.rot90(seg_crop, rotate)
-                    
+                
+#                img_crop = transform.warp(img_crop, inverse_map=shear_matrix)
+#                seg_crop = transform.warp(seg_crop, inverse_map=shear_matrix)
+                img_crop = perspective(images=img_crop)
+                seg_crop = perspective(images = seg_crop)
                 img_crop = scipy.ndimage.shift(img_crop, [width_shift_range, height_shift_range])
                 seg_crop = scipy.ndimage.shift(seg_crop, [width_shift_range, height_shift_range])
                 thresh, seg_crop = cv2.threshold(seg_crop,0.5,1,cv2.THRESH_BINARY)
@@ -236,29 +258,36 @@ class CTCRAMReaderSequence2D(object):
     def read_new_image(self, type_test):
         if type_test == 'best_test':
             index = self.q_best.dequeue_many(self.batch_size)
+        elif type_test == 'epoch_test':
+            index = self.valid_list_test[0: self.batch_size]
         else:
             index = self.q.dequeue_many(self.batch_size)
 
-        image_seq = []
-        seg_seq = []
+        image_batch = []
+        seg_batch = []
         for j in range(0, self.batch_size):
-            img = cv2.imread(os.path.join(self.sequence_folder, 'train', self.metadata['filelist'][index[j]][0]), -1)
-            img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
-            if img is None:
-                raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.metadata['filelist'][index[j]][0])))
-            img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
-            if self.metadata['filelist'][index[j]][1] == 'None':
-                seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
-            else:
-                seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.metadata['filelist'][index[j]][1]), -1)
-                seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
-                seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
-                thresh, seg = cv2.threshold(seg,0.5,1,cv2.THRESH_BINARY)
-            image_seq.append(img)
-            seg_seq.append(seg)
+            image_seq = []
+            seg_seq = []
+            for i in range(0, self.unroll_len):
+                img = cv2.imread(os.path.join(self.sequence_folder, 'train', self.metadata['filelist'][index[j] - (self.unroll_len - i - 1)][0]), -1)
+                img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
+                if img is None:
+                    raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.metadata['filelist'][index[j] - (self.unroll_len - i - 1)][0])))
+                img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                if self.metadata['filelist'][index[j] - (self.unroll_len - i - 1)][1] == 'None':
+                    seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
+                else:
+                    seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.metadata['filelist'][index[j] - (self.unroll_len - i - 1)][1]), -1)
+                    seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
+                    seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                    thresh, seg = cv2.threshold(seg,0.5,1,cv2.THRESH_BINARY)
+                image_seq.append(img)
+                seg_seq.append(seg)
+            image_batch.append(image_seq)
+            seg_batch.append(seg_seq)
         
-        image_batch = tf.expand_dims(image_seq, 1)
-        seg_batch = tf.expand_dims(seg_seq, 1)
+#        image_batch = tf.expand_dims(image_batch, 1)
+#        seg_batch = tf.expand_dims(seg_batch, 1)
         image_batch = tf.expand_dims(image_batch, 4)
         seg_batch = tf.expand_dims(seg_batch, 4)
 

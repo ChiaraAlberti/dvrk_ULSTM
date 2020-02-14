@@ -4,6 +4,7 @@ import tensorflow as tf
 import pickle
 from typing import List
 from tensorflow.python.keras import regularizers
+import numpy as np
 
 try:
     import tensorflow.python.keras as k
@@ -250,7 +251,7 @@ class ULSTMnet2D(k.Model):
         self.AttentionBlock = []
         self.GateSignal = []
         self.total_stride = 1
-        self.dropout_rate = 0.3
+        self.dropout_rate = 0.1
         self.drop_input = drop_input
         self.pad_image = pad_image
         self.pretraining = pretraining
@@ -409,6 +410,53 @@ class ULSTMnet2D(k.Model):
         for down_block, state in zip(self.DownLayers, states):
             down_block.set_states(state)
 
+class DownConv(k.Model):
+    def __init__(self, out_ch, data_format = 'NHWC'):
+        super(DownConv, self).__init__()
+        self.data_format_keras = 'channels_first' if data_format[1] == 'C' else 'channels_last'
+        self.channel_axis = 1 if data_format[1] == 'C' else -1
+        self.out_ch = out_ch
+
+        self.Conv = k.layers.Conv2D(filters=self.out_ch, kernel_size=3)
+        self.Batch = k.layers.BatchNormalization(axis = self.channel_axis)
+        self.MaxPool = k.layers.MaxPool2D(pool_size=(2,2), strides=2)
+        self.ReLU = k.layers.LeakyReLU()
+        
+    def __call__(self, x):
+        x = self.Conv(x)
+        x = self.Batch(x)
+        x = self.MaxPool(x)
+        x = self.ReLU(x)
+        return x
+
+class Discriminator(k.Model):
+    def __init__(self, data_format = 'NHWC'):
+        super(Discriminator, self).__init__()
+        self.data_format_keras = 'channels_first' if data_format[1] == 'C' else 'channels_last'
+        self.channel_axis = 1 if data_format[1] == 'C' else -1
+        self.n_channels = [
+            16,
+            32,
+            64,
+            128,
+        ]
+
+        self.conv1 = DownConv(self.n_channels[0])
+        self.conv2 = DownConv(self.n_channels[1])
+        self.conv3 = DownConv(self.n_channels[2])
+        self.conv4 = DownConv(self.n_channels[3])
+        self.Dense = k.layers.Dense(1)
+
+    def __call__(self, x):
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
+        dim = np.prod(x.shape[1:])
+        x = tf.reshape(x, [-1, dim])
+        x = self.Dense(x)
+        x = k.activations.sigmoid(x)
+        return x
 
 if __name__ == "__main__":
 

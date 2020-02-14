@@ -22,6 +22,7 @@ from netdict import Net_type
 import csv 
 import matplotlib.pyplot as plt
 from datetime import datetime
+from array2gif import write_gif
 
 
 
@@ -105,7 +106,7 @@ class LossFunction:
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
         logits = logits[:, -1]
-        bce_loss = tf.nn.weighted_cross_entropy_with_logits(y_true, logits, 0.8)
+        bce_loss = tf.nn.weighted_cross_entropy_with_logits(y_true, logits, 0.6)
         dice_loss = self.dice_loss(y_true, y_pred)
         loss = alpha*bce_loss + (1- alpha)*dice_loss
         return loss
@@ -147,6 +148,7 @@ class FocalTverskyLoss():
         return 1-loss #tf.math.pow((1-loss), gamma) 
         
 
+
 def train():
    
     device = '/gpu:0' if params.gpu_id >= 0 else '/cpu:0'
@@ -158,12 +160,12 @@ def train():
         drop_input = True
         l1 = 0
         l2 = 0
-        kernel_init = 'he_normal'
+        kernel_init = 'he_uniform'
         net_type = 'original_net'
         pretraining = False
         if not pretraining:
-            lrate = 0.0005
-            lr_decay = 0.005
+            lrate = 0.00001
+            lr_decay = 0.1
         else:
             lrate  = 0.0001
             lr_decay = 0.005
@@ -171,12 +173,14 @@ def train():
         step_per_epoch = data_provider.num_steps_per_epoch
         num_epoch = 0
         patience = 1000
+        discriminator = False
         
         net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
         model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining, pretraining_type)
 #        if pretraining != False: 
 #            model = TrainableLayers(model, pretraining_type)
-
+        if discriminator:
+            disc = Nets.Discriminator(params.data_format)
         #Initialization of Losses and Metrics
         loss_fn = LossFunction()
 #        loss_fn = WeightedLoss()
@@ -194,11 +198,47 @@ def train():
         final_val_prec = 0
 
         #Exponential learning rate decay
-        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate = lrate, 
-                decay_steps=100000,
-                decay_rate=lr_decay, 
-                staircase=True)
+#        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+#                initial_learning_rate = lrate, 
+#                decay_steps=10000,
+#                decay_rate=lr_decay, 
+#                staircase=True)
+        
+#        class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
+#            def __init__(self):
+#                print('Learning rate initialized')
+#                
+#            @tf.function   
+#            def __call__(self, step):
+#              if tf.less(step, 500):
+#                return 0.0005
+#              elif tf.logical_and(tf.greater(step, 500), tf.less(step, 1000)):
+#                return 0.0001
+#              elif tf.logical_and(tf.greater(step, 1000), tf.less(step, 2000)):
+#                return 0.00005
+#              elif tf.logical_and(tf.greater(step, 2000), tf.less(step, 5000)):
+#                return 0.00001
+#              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 10000)):
+#                return 0.000005
+#              elif tf.logical_and(tf.greater(step, 10000), tf.less(step, 20000)):
+#                return 0.0000025
+#              else:
+#                return 0.000001
+
+        class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
+            def __init__(self):
+                print('Learning rate initialized')
+                
+            @tf.function   
+            def __call__(self, step):
+              if tf.less(step, 5000):
+                return 0.00001
+              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 10000)):
+                return 0.000005
+              elif tf.logical_and(tf.greater(step, 10000), tf.less(step, 20000)):
+                return 0.0000025
+              else:
+                return 0.000001
         
         class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
     
@@ -235,11 +275,16 @@ def train():
                 return self.stopped_epoch
         
         #Adam optimizer
-        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
-#        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lrate)
+#        optimizer = tf.keras.optimizers.Adam(learning_rate=decay_lr())
+        if discriminator: 
+            optimizer_disc = tf.keras.optimizers.Adam(learning_rate=decay_lr())
+        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lrate)
         
         #Checkpoint 
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
+        
+
+
         #Early Stopping callback
         early_stopping = EarlyStoppingAtMinLoss(patience)
         
@@ -270,11 +315,20 @@ def train():
 
         @tf.function
         def train_step(image, label): 
-            with tf.GradientTape() as tape:
+            with tf.GradientTape() as gen_tape: #, tf.GradientTape() as disc_tape:
                 logits, output = model(image, True)
-                loss = loss_fn.bce_dice_loss(label, output, logits)
-            gradients = tape.gradient(loss, model.trainable_variables)
+                if discriminator:
+                    real = disc(label[:,-1])
+                    fake = disc(output[:, -1])
+                    d_loss = tf.reduce_mean(tf.math.log(real) + tf.math.log(1-fake))
+                    loss = loss_fn.bce_dice_loss(label, output, logits)
+                else: 
+                    loss = loss_fn.bce_dice_loss(label, output, logits)                 
+            gradients = gen_tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+            if discriminator: 
+                gradients_disc = disc_tape.gradient(d_loss, disc.trainable_variables)
+                optimizer_disc.apply_gradients(zip(gradients_disc, disc.trainable_variables))
             ckpt.step.assign_add(1)
             train_loss(loss)
             if params.channel_axis == 1:
@@ -325,6 +379,11 @@ def train():
                 metric(label[:, -1], output[:, -1])
                 best_test_metrics[i] = metric
             return output, tt_loss
+        
+        @tf.function
+        def test_epoch(image):
+            logits, output = model(image, False)
+            return output
 
         #inizialize directories and dictionaries to use on tensorboard
         train_summary_writer = val_summary_writer = test_summary_writer = best_test_summary_writer = None
@@ -413,6 +472,10 @@ def train():
             minimum_found = False
             stopped_epoch = None
             stop = False
+            output_batch_list = {}
+            for i in range(0, params.batch_size):
+                output_batch_list[str(i)] = []
+
             
             log_print('Starting of epoch: {}'.format(int(num_epoch)))
             progbar = tf.keras.utils.Progbar(step_per_epoch)
@@ -433,7 +496,7 @@ def train():
                 
                 progbar.update(int(ckpt.step)- num_epoch*step_per_epoch)
                 
-                model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
+                #model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
 
                 if not int(ckpt.step) % params.validation_interval:
                     #validation
@@ -457,7 +520,7 @@ def train():
                                                     profiler_outdir=params.experiment_log_dir)
                     
                     val_bw_predictions = post_processing(val_output_sequence[:, -1])
-                    model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended   
+                    #model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended   
               
                
                 if not int(ckpt.step) % step_per_epoch:
@@ -512,6 +575,18 @@ def train():
                     for i in range(0, 7):
                         val_metrics[i].reset_states()
                     val_loss.reset_states()
+                    
+                    image_seq, seg_seq = data_provider.read_new_image('epoch_test')
+                    output = test_epoch(image_seq)
+                    
+                    for i in range(0, image_seq.shape[0]):
+                        image = cv2.normalize(np.array(output[i, -1]), None, 0, 255, cv2.NORM_MINMAX)
+#                        image = cv2.resize(image, (300, 300), interpolation = cv2.INTER_AREA)
+                        image = image.astype(np.uint8)
+                        image = cv2.cvtColor(image,cv2.COLOR_GRAY2RGB)
+                        image = np.moveaxis(image, -1, 0)
+                        output_batch_list[str(i)].append(image)                   
+                        write_gif(output_batch_list[str(i)], params.experiment_save_dir + '/prediction' + str(i) + '.gif', fps=5)
 
                     num_epoch = num_epoch +1
                     log_print('Starting of epoch: {}'.format(int(num_epoch)))
