@@ -31,6 +31,7 @@ class CTCRAMReaderSequence2D(object):
         #initialization of the different parts of dataset
         self.valid_list_train, self.valid_list_val, self.valid_list_test, self.metadata = self._dataset_split(self.mode)
         self.num_steps_per_epoch = int(np.floor(len(self.valid_list_train)/self.batch_size))
+        self.num_steps_per_val = int(np.floor(len(self.valid_list_val)/self.batch_size))
         #create a queue for the testing
         self.q, self.q_best, self.q_train, self.q_val = self.create_queue()
 

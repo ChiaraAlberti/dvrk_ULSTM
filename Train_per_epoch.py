@@ -160,17 +160,19 @@ def train():
         drop_input = True
         l1 = 0
         l2 = 0
-        kernel_init = 'he_uniform'
+        kernel_init = 'glorot_uniform'
         net_type = 'original_net'
         pretraining = False
         if not pretraining:
-            lrate = 0.00001
+            lrate = 0.0001
             lr_decay = 0.1
         else:
             lrate  = 0.0001
             lr_decay = 0.005
         pretraining_type = 'full'
         step_per_epoch = data_provider.num_steps_per_epoch
+        step_val = data_provider.num_steps_per_val
+        step_gif = step_per_epoch*50
         num_epoch = 0
         patience = 1000
         discriminator = False
@@ -232,11 +234,11 @@ def train():
             @tf.function   
             def __call__(self, step):
               if tf.less(step, 5000):
-                return 0.00001
+                return 0.00005
               elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 10000)):
-                return 0.000005
+                return 0.00001
               elif tf.logical_and(tf.greater(step, 10000), tf.less(step, 20000)):
-                return 0.0000025
+                return 0.000005
               else:
                 return 0.000001
         
@@ -275,10 +277,10 @@ def train():
                 return self.stopped_epoch
         
         #Adam optimizer
-#        optimizer = tf.keras.optimizers.Adam(learning_rate=decay_lr())
+        optimizer = tf.keras.optimizers.Adam(learning_rate=decay_lr())
         if discriminator: 
             optimizer_disc = tf.keras.optimizers.Adam(learning_rate=decay_lr())
-        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lrate)
+#        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lrate)
         
         #Checkpoint 
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
@@ -498,32 +500,56 @@ def train():
                 
                 #model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
 
-                if not int(ckpt.step) % params.validation_interval:
-                    #validation
-                    (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None, None)
-                        
-                    #if profile is true, write on tensorboard the network graph
-                    if params.profile:
-                        graph_dir = os.path.join(params.experiment_log_dir, 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
-                        tf.summary.trace_on(graph=True, profiler=True)
-                        graph_summary_writer = tf.summary.create_file_writer(graph_dir)
-                    
-                    val_output_sequence, val_loss_value= val_step(val_image_sequence,
-                                                                   val_seg_sequence)
-                    
-                    if not minimum_found:
-                        stop, best_weights = early_stopping.step_end(num_epoch, val_loss)
-                    
-                    if params.profile:
-                        with graph_summary_writer.as_default():
-                            tf.summary.trace_export('train_step', step=int(ckpt.step),
-                                                    profiler_outdir=params.experiment_log_dir)
-                    
-                    val_bw_predictions = post_processing(val_output_sequence[:, -1])
-                    #model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended   
+#                if not int(ckpt.step) % params.validation_interval:
+#                    #validation
+#                    (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None, None)
+#                        
+#                    #if profile is true, write on tensorboard the network graph
+#                    if params.profile:
+#                        graph_dir = os.path.join(params.experiment_log_dir, 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
+#                        tf.summary.trace_on(graph=True, profiler=True)
+#                        graph_summary_writer = tf.summary.create_file_writer(graph_dir)
+#                    
+#                    val_output_sequence, val_loss_value= val_step(val_image_sequence,
+#                                                                   val_seg_sequence)
+#                    
+#                    if not minimum_found:
+#                        stop, best_weights = early_stopping.step_end(num_epoch, val_loss)
+#                    
+#                    if params.profile:
+#                        with graph_summary_writer.as_default():
+#                            tf.summary.trace_export('train_step', step=int(ckpt.step),
+#                                                    profiler_outdir=params.experiment_log_dir)
+#                    
+#                    val_bw_predictions = post_processing(val_output_sequence[:, -1])
+#                    #model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended   
               
                
                 if not int(ckpt.step) % step_per_epoch:
+                    
+                    #validation
+                    for i in range(0, step_val):
+                        (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None, None)                      
+                        #if profile is true, write on tensorboard the network graph
+                        if params.profile:
+                            graph_dir = os.path.join(params.experiment_log_dir, 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
+                            tf.summary.trace_on(graph=True, profiler=True)
+                            graph_summary_writer = tf.summary.create_file_writer(graph_dir)
+                    
+                        val_output_sequence, val_loss_value= val_step(val_image_sequence,
+                                                                      val_seg_sequence)
+                        if params.profile:
+                            with graph_summary_writer.as_default():
+                                tf.summary.trace_export('train_step', step=int(ckpt.step),
+                                                        profiler_outdir=params.experiment_log_dir)
+                        val_bw_predictions = post_processing(val_output_sequence[:, -1])
+                    
+                    if not minimum_found:
+                        stop, best_weights = early_stopping.step_end(num_epoch, val_loss)
+
+                    #model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended                      
+                    
+                    
                     #print training values to console 
                     log_print(template.format('Training', int(ckpt.step),
                           train_loss.result(),
@@ -565,7 +591,7 @@ def train():
                         val_imgs_dict['GT'] = val_seg_sequence[:, -1]
                         val_imgs_dict['Output'] = val_output_sequence[:, -1]
                         val_imgs_dict['Output_bw'] = val_bw_predictions
-                        tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict, params.validation_interval)
+                        tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict, step_per_epoch/step_val)
                     
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
@@ -576,6 +602,12 @@ def train():
                         val_metrics[i].reset_states()
                     val_loss.reset_states()
                     
+                    num_epoch = num_epoch +1
+                    log_print('Starting of epoch: {}'.format(int(num_epoch)))
+                    
+                    progbar = tf.keras.utils.Progbar(step_per_epoch)
+                
+                if not int(ckpt.step) % step_gif:
                     image_seq, seg_seq = data_provider.read_new_image('epoch_test')
                     output = test_epoch(image_seq)
                     
@@ -588,11 +620,6 @@ def train():
                         output_batch_list[str(i)].append(image)                   
                         write_gif(output_batch_list[str(i)], params.experiment_save_dir + '/prediction' + str(i) + '.gif', fps=5)
 
-                    num_epoch = num_epoch +1
-                    log_print('Starting of epoch: {}'.format(int(num_epoch)))
-                    
-                    progbar = tf.keras.utils.Progbar(step_per_epoch)
-      
                 #save checkpoints
                 if int(ckpt.step) % params.save_checkpoint_iteration == 0 or int(ckpt.step) == params.num_iterations:
                     if not params.dry_run:

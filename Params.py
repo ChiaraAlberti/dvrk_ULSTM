@@ -31,7 +31,7 @@ class CTCParams(ParamsBase):
     root_data_dir = ROOT_DATA_DIR
     crop_size = (64, 64)  # (height, width) preferably height=width 
     reshape_size = (64, 64)
-    batch_size = 30
+    batch_size = 10
     unroll_len = 5
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
     class_weights = [0.4, 0.6]
