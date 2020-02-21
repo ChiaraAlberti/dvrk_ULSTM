@@ -106,7 +106,7 @@ class LossFunction:
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
         logits = logits[:, -1]
-        bce_loss = tf.nn.weighted_cross_entropy_with_logits(y_true, logits, 0.6)
+        bce_loss = tf.nn.weighted_cross_entropy_with_logits(y_true, logits, 0.8)
         dice_loss = self.dice_loss(y_true, y_pred)
         loss = alpha*bce_loss + (1- alpha)*dice_loss
         return loss
@@ -157,10 +157,10 @@ def train():
         data_provider = params.data_provider
         #Initialization of the model 
         dropout = 0
-        drop_input = True
+        drop_input = False
         l1 = 0
         l2 = 0
-        kernel_init = 'glorot_uniform'
+        kernel_init = 'he_uniform'
         net_type = 'original_net'
         pretraining = False
         if not pretraining:
@@ -176,9 +176,10 @@ def train():
         num_epoch = 0
         patience = 1000
         discriminator = False
+        attention_gate = False
         
         net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining, pretraining_type)
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining, pretraining_type, attention_gate)
 #        if pretraining != False: 
 #            model = TrainableLayers(model, pretraining_type)
         if discriminator:
@@ -205,42 +206,42 @@ def train():
 #                decay_steps=10000,
 #                decay_rate=lr_decay, 
 #                staircase=True)
+               
         
-#        class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
-#            def __init__(self):
-#                print('Learning rate initialized')
-#                
-#            @tf.function   
-#            def __call__(self, step):
-#              if tf.less(step, 500):
-#                return 0.0005
-#              elif tf.logical_and(tf.greater(step, 500), tf.less(step, 1000)):
-#                return 0.0001
-#              elif tf.logical_and(tf.greater(step, 1000), tf.less(step, 2000)):
-#                return 0.00005
-#              elif tf.logical_and(tf.greater(step, 2000), tf.less(step, 5000)):
-#                return 0.00001
-#              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 10000)):
-#                return 0.000005
-#              elif tf.logical_and(tf.greater(step, 10000), tf.less(step, 20000)):
-#                return 0.0000025
-#              else:
-#                return 0.000001
-
         class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
             def __init__(self):
                 print('Learning rate initialized')
                 
             @tf.function   
             def __call__(self, step):
-              if tf.less(step, 5000):
+              if tf.less(step, 500):
+                return 0.0001
+              elif tf.logical_and(tf.greater(step, 500), tf.less(step, 2000)):
                 return 0.00005
-              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 10000)):
+              elif tf.logical_and(tf.greater(step, 2000), tf.less(step, 5000)):
                 return 0.00001
-              elif tf.logical_and(tf.greater(step, 10000), tf.less(step, 20000)):
+              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 10000)):
                 return 0.000005
+              elif tf.logical_and(tf.greater(step, 10000), tf.less(step, 20000)):
+                return 0.0000025
               else:
                 return 0.000001
+            
+#        class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
+#            def __init__(self):
+#                print('Learning rate initialized')
+#                
+#            @tf.function   
+#            def __call__(self, step):
+#              if tf.less(step, 1000):
+#                return 0.00005
+#              elif tf.logical_and(tf.greater(step, 1000), tf.less(step, 2000)):
+#                return 0.00001
+#              elif tf.logical_and(tf.greater(step, 2000), tf.less(step, 5000)):
+#                return 0.000005
+#              else:
+#                return 0.000001
+        
         
         class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
     
@@ -440,8 +441,11 @@ def train():
             images_shape = images.shape
             im_reshaped = np.reshape(images, (images.shape[0], images.shape[1], images.shape[2]))
             bw_predictions = np.zeros((images.shape[0], images.shape[1], images.shape[2])).astype(np.float32)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
             for i in range(0, images.shape[0]):
                 ret, bw_predictions[i] = cv2.threshold(im_reshaped[i],0.8, 1 ,cv2.THRESH_BINARY)
+                bw_predictions[i] = cv2.morphologyEx(bw_predictions[i], cv2.MORPH_OPEN, kernel)
+                bw_predictions[i] = cv2.morphologyEx(bw_predictions[i], cv2.MORPH_CLOSE, kernel)
             bw_predictions = np.reshape(bw_predictions, images_shape)
             return bw_predictions
         
@@ -715,7 +719,7 @@ def train():
                 #save parameters values and final loss and precision values 
                 with open(os.path.join(params.experiment_save_dir, 'params_list.csv'), 'w') as fobj:
                     writer = csv.writer(fobj)
-                    model_dict = {'Pretraining': pretraining, 'Mode': pretraining_type, 'Stopping_epoch': stopped_epoch,
+                    model_dict = {'Pretraining': pretraining, 'Mode': pretraining_type, 'Stopping_epoch': stopped_epoch, 'Attention gate': attention_gate,
                                   'Dropout': dropout, 'Drop_input': drop_input, 'L1': l1, 'L2': l2, 
                                   'Kernel init': kernel_init, 'Net type': net_type, 'Learning rate': lrate, 
                                   'Lr decay': lr_decay}
@@ -850,5 +854,9 @@ if __name__ == '__main__':
     # finally:
     #     log_print('Done')
     
+    
+#    changes = [[False, False], [False, True], [True, False]]
+#    for i, comb in enumerate(changes):
     params = Params.CTCParams(args_dict)
     train()
+    

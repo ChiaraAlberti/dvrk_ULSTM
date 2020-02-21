@@ -22,8 +22,8 @@ class CTCRAMReaderSequence2D(object):
         self.batch_size = batch_size
         self.data_format = data_format
         self.randomize = randomize
-        self.width_shift_range = 0.1
-        self.height_shift_range = 0.1
+        self.width_shift_range = 0.05
+        self.height_shift_range = 0.05
         self.used_masks_train = []
         self.used_masks_val = []
         self.mode = 'random'
@@ -54,8 +54,8 @@ class CTCRAMReaderSequence2D(object):
             metadata = pickle.load(fobj)
         filename_list = metadata['filelist']
         valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
-        valid_list_train, valid_list_val = kf.split(valid_masks)
-        return valid_list_train, valid_list_val
+        valid_list_train, valid_list_test = kf.split(valid_masks)
+        return valid_list_train, valid_list_test
         
     #calculate the number of iterations for each epoch
     def get_steps(self):
@@ -157,7 +157,7 @@ class CTCRAMReaderSequence2D(object):
 #            jump = np.random.randint(1,4) if self.randomize else 1
             jump = 1 
 #            shear_matrix = transform.AffineTransform(shear=np.random.uniform(-0.3,0.3))
-            perspective = iaa.PerspectiveTransform(scale=(0.01, 0.15))
+            perspective = iaa.PerspectiveTransform(scale=(0.01, 0.1))
             
             if self.width_shift_range or self.height_shift_range:
                 if self.width_shift_range:
@@ -195,6 +195,7 @@ class CTCRAMReaderSequence2D(object):
                 img_max = img_crop.max()
                 seg_crop = seg[crop_y:crop_y_stop, crop_x:crop_x_stop]
                 
+#                if flag == 'train':
                 if self.randomize:
                     # contrast factor between [0.5, 1.5]
                     random_constrast_factor = np.random.rand() + 0.5
@@ -203,22 +204,22 @@ class CTCRAMReaderSequence2D(object):
                     img_crop = self._adjust_contrast_(img_crop, random_constrast_factor)
                     img_crop = self._adjust_brightness_(img_crop, random_brightness_delta)
                     
-                if flip[0]:
-                    img_crop = cv2.flip(img_crop, 0)
-                    seg_crop = cv2.flip(seg_crop, 0)
-                if flip[1]:
-                    img_crop = cv2.flip(img_crop, 1)
-                    seg_crop = cv2.flip(seg_crop, 1)
-                if rotate > 0:
-                    img_crop = np.rot90(img_crop, rotate)
-                    seg_crop = np.rot90(seg_crop, rotate)
-                
-#                img_crop = transform.warp(img_crop, inverse_map=shear_matrix)
-#                seg_crop = transform.warp(seg_crop, inverse_map=shear_matrix)
-                img_crop = perspective(images=img_crop)
-                seg_crop = perspective(images = seg_crop)
-                img_crop = scipy.ndimage.shift(img_crop, [width_shift_range, height_shift_range])
-                seg_crop = scipy.ndimage.shift(seg_crop, [width_shift_range, height_shift_range])
+                    if flip[0]:
+                        img_crop = cv2.flip(img_crop, 0)
+                        seg_crop = cv2.flip(seg_crop, 0)
+                    if flip[1]:
+                        img_crop = cv2.flip(img_crop, 1)
+                        seg_crop = cv2.flip(seg_crop, 1)
+                    if rotate > 0:
+                        img_crop = np.rot90(img_crop, rotate)
+                        seg_crop = np.rot90(seg_crop, rotate)
+                    
+#                    img_crop = transform.warp(img_crop, inverse_map=shear_matrix)
+#                    seg_crop = transform.warp(seg_crop, inverse_map=shear_matrix)
+                    img_crop = perspective(images=img_crop)
+                    seg_crop = perspective(images = seg_crop)
+                    img_crop = scipy.ndimage.shift(img_crop, [width_shift_range, height_shift_range])
+                    seg_crop = scipy.ndimage.shift(seg_crop, [width_shift_range, height_shift_range])
                 thresh, seg_crop = cv2.threshold(seg_crop,0.5,1,cv2.THRESH_BINARY)
                 
                 image_seq.append(img_crop)

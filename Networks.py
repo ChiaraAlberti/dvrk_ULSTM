@@ -223,25 +223,28 @@ class AttnGatingBlock(k.Model):
     def call(self, x, g):
         shape_x = x.shape # 32
 #        shape_g = g.shape  # 16
+#        print(shape_x)
+#        print(shape_g)
         theta_x = self.thetaConv(x)  # 16
 #        shape_theta_x = theta_x.shape
         phi_g = self.phiConv(g)
         #upsample_g = k.layers.Conv2DTranspose(int(self.inter_shape), (5, 5),strides=(shape_theta_x[1] // shape_g[1], shape_theta_x[2] // shape_g[2]),padding='same')(phi_g)  # 16
         concat_xg = k.layers.add([phi_g, theta_x])
-        act_xg = k.layers.LeakyReLU()(concat_xg)
+        act_xg = k.layers.ReLU()(concat_xg)
         psi = self.psiConv(act_xg)
         sigmoid_xg = k.activations.sigmoid(psi)
         shape_sigmoid = sigmoid_xg.shape
         upsample_psi = k.layers.UpSampling2D(size=(shape_x[1] // shape_sigmoid[1], shape_x[2] // shape_sigmoid[2]))(sigmoid_xg)  # 32
-        upsample_psi = k.layers.Lambda(lambda x, repnum: tf.keras.backend.repeat_elements(x, shape_x[3], axis=3), arguments={'repnum': shape_x[3]})(upsample_psi)
-        y = k.layers.multiply([upsample_psi, x])
-        result = self.resultConv(y)
-        result_bn = self.batch(result)
-        return result_bn
+#        upsample_psi = k.layers.Lambda(lambda x, repnum: tf.keras.backend.repeat_elements(x, shape_x[3], axis=3), arguments={'repnum': shape_x[3]})(upsample_psi)
+        result = k.layers.multiply([upsample_psi, x])
+#        result = self.resultConv(y)
+#        result_bn = self.batch(result)
+#        print(result_bn.shape)
+        return result
 
 
 class ULSTMnet2D(k.Model):
-    def __init__(self, net_params=None, data_format='NHWC', pad_image=True, drop_input= False, pretraining = False, pretraining_type = 'full'):
+    def __init__(self, net_params=None, data_format='NHWC', pad_image=True, drop_input= False, pretraining = False, pretraining_type = 'full', attention_gate = False):
         super(ULSTMnet2D, self).__init__()
         self.data_format_keras = 'channels_first' if data_format[1] == 'C' else 'channels_last'
         self.channel_axis = 1 if data_format[1] == 'C' else -1
@@ -255,7 +258,7 @@ class ULSTMnet2D(k.Model):
         self.drop_input = drop_input
         self.pad_image = pad_image
         self.pretraining = pretraining
-        self.attention_gate = False
+        self.attention_gate = attention_gate
 
         if not len(net_params['down_conv_kernels']) == len(net_params['lstm_kernels']):
             raise ValueError('Number of layers in down path ({}) do not match number of LSTM layers ({})'.format(
@@ -327,8 +330,8 @@ class ULSTMnet2D(k.Model):
 
     def call(self, inputs, training=None, mask=None):
         input_shape = inputs.shape
-        if self.drop_input and training:
-            inputs = k.layers.Dropout(self.dropout_rate)(inputs)
+#        if self.drop_input and training:
+#            inputs = k.layers.Dropout(self.dropout_rate)(inputs)
         min_pad_value = self.total_stride * int(self.pad_image) if self.pad_image else 0
 
         if self.channel_axis == 1:
@@ -348,6 +351,11 @@ class ULSTMnet2D(k.Model):
         skip_inputs = []
         out_down = inputs
         out_skip = tf.reshape(inputs, [input_shape[0] * input_shape[1], input_shape[2], input_shape[3], input_shape[4]])
+#        if self.attention_gate:
+#            for down_layer in self.DownLayers:
+#                out_down, out_skip = down_layer(out_down, training=training, mask=mask)
+#                skip_inputs.append(out_skip)
+#        else:
         for down_layer in self.DownLayers:
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
@@ -363,6 +371,7 @@ class ULSTMnet2D(k.Model):
 #            up_input = self.ConnectLayer(up_input)
                 
         skip_inputs.reverse()
+        first = True
         assert len(skip_inputs) == len(self.UpLayers)
         if self.attention_gate:
             for up_layer, skip_input, signal_gate, attention_block in zip(self.UpLayers, skip_inputs, self.GateSignal, self.AttentionBlock):
@@ -373,9 +382,10 @@ class ULSTMnet2D(k.Model):
                 up_input = up_layer((up_input, attn), training=training, mask=mask)
         else:
             for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
-                if up_layer == self.last_layer and training and self.drop_input:
-                    skip_input = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(skip_input) 
                 up_input = up_layer((up_input, skip_input), training=training, mask=mask)
+                if first and training and self.drop_input:
+                    up_input = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(skip_input) 
+                    first = False
 
         logits_output_shape = up_input.shape
         logits_output = tf.reshape(up_input, [input_shape[0], input_shape[1], logits_output_shape[1],
@@ -392,9 +402,6 @@ class ULSTMnet2D(k.Model):
 #                        crops[3][0]:crops[3][1], crops[4][0]:crops[4][1]]
         return logits_output, output
 
-#    def get_config(self):
-#        config = super(ULSTMnet2D, self).get_config()
-#        config.update({'': self.units})
 
     def reset_states_per_batch(self, is_last_batch):
         for down_block in self.DownLayers:
