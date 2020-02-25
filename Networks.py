@@ -244,7 +244,7 @@ class AttnGatingBlock(k.Model):
 
 
 class ULSTMnet2D(k.Model):
-    def __init__(self, net_params=None, data_format='NHWC', pad_image=True, drop_input= False, pretraining = False, pretraining_type = 'full', attention_gate = False):
+    def __init__(self, net_params=None, data_format='NHWC', pad_image=True, dropout= 0, pretraining = False, pretraining_type = 'full', attention_gate = False):
         super(ULSTMnet2D, self).__init__()
         self.data_format_keras = 'channels_first' if data_format[1] == 'C' else 'channels_last'
         self.channel_axis = 1 if data_format[1] == 'C' else -1
@@ -254,8 +254,7 @@ class ULSTMnet2D(k.Model):
         self.AttentionBlock = []
         self.GateSignal = []
         self.total_stride = 1
-        self.dropout_rate = 0.1
-        self.drop_input = drop_input
+        self.dropout_rate = dropout
         self.pad_image = pad_image
         self.pretraining = pretraining
         self.attention_gate = attention_gate
@@ -288,6 +287,7 @@ class ULSTMnet2D(k.Model):
             self.DownLayers.append(DownBlock2D(conv_filters, lstm_filters, stride, data_format, weights_list, pretraining))
             self.total_stride *= self.DownLayers[-1].total_stride
         
+        self.Dropout = k.layers.Dropout(self.dropout_rate)
         if pretraining == 'imagenet':
             for i in range(0, 3):
                 self.ConnectLayer.append(k.layers.Conv2D(filters=512, kernel_size=3, strides=1, use_bias=True,
@@ -326,7 +326,7 @@ class ULSTMnet2D(k.Model):
             self.last_layer = conv_filters[-1]
             
 #        self.Sigmoid = k.layers.Conv2D(1, 1, 1, use_bias=True, activation = 'sigmoid', data_format=self.data_format_keras, padding='same')
-
+        
 
     def call(self, inputs, training=None, mask=None):
         input_shape = inputs.shape
@@ -359,8 +359,8 @@ class ULSTMnet2D(k.Model):
         for down_layer in self.DownLayers:
             skip_inputs.append(out_skip)
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
-        if self.drop_input and training:
-            out_skip = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(out_skip)
+
+        out_skip = self.Dropout(out_skip, training)
         up_input = out_skip
 #        if self.pretraining == 'imagenet':
 #            for layer in self.ConnectLayer:
@@ -372,19 +372,18 @@ class ULSTMnet2D(k.Model):
                 
         skip_inputs.reverse()
         first = True
+#        second = False
         assert len(skip_inputs) == len(self.UpLayers)
         if self.attention_gate:
             for up_layer, skip_input, signal_gate, attention_block in zip(self.UpLayers, skip_inputs, self.GateSignal, self.AttentionBlock):
-                if up_layer == self.last_layer and training and self.drop_input:
-                    skip_input = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(skip_input) 
                 up_input = signal_gate(up_input, is_batchnorm=True)
                 attn = attention_block(skip_input, up_input)
                 up_input = up_layer((up_input, attn), training=training, mask=mask)
         else:
             for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
                 up_input = up_layer((up_input, skip_input), training=training, mask=mask)
-                if first and training and self.drop_input:
-                    up_input = k.layers.SpatialDropout2D(self.dropout_rate, data_format=None)(skip_input) 
+                if first:
+                    up_input = self.Dropout(up_input, training)
                     first = False
 
         logits_output_shape = up_input.shape

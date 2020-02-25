@@ -115,7 +115,7 @@ class WeightedLoss():
     def loss(self, y_true, y_pred):
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
-        loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 1.2)
+        loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 0.8)
 #        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
         return loss
 
@@ -156,8 +156,8 @@ def train():
         #Initialization of the data
         data_provider = params.data_provider
         #Initialization of the model 
-        dropout = 0
-        drop_input = False
+        recurrent_dropout = 0.3
+        dropout = 0.3
         l1 = 0
         l2 = 0
         kernel_init = 'he_uniform'
@@ -178,8 +178,8 @@ def train():
         discriminator = False
         attention_gate = False
         
-        net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining, pretraining_type, attention_gate)
+        net_kernel_params = Net_type(recurrent_dropout, (l1, l2), kernel_init)[net_type]
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, dropout, pretraining, pretraining_type, attention_gate)
 #        if pretraining != False: 
 #            model = TrainableLayers(model, pretraining_type)
         if discriminator:
@@ -233,14 +233,12 @@ def train():
 #                
 #            @tf.function   
 #            def __call__(self, step):
-#              if tf.less(step, 1000):
+#              if tf.less(step, 5000):
+#                return 0.0001
+#              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 8000)):
 #                return 0.00005
-#              elif tf.logical_and(tf.greater(step, 1000), tf.less(step, 2000)):
-#                return 0.00001
-#              elif tf.logical_and(tf.greater(step, 2000), tf.less(step, 5000)):
-#                return 0.000005
 #              else:
-#                return 0.000001
+#                return 0.00001
         
         
         class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
@@ -325,8 +323,10 @@ def train():
                     fake = disc(output[:, -1])
                     d_loss = tf.reduce_mean(tf.math.log(real) + tf.math.log(1-fake))
                     loss = loss_fn.bce_dice_loss(label, output, logits)
+#                    loss = loss_fn.loss(label, logits)
                 else: 
-                    loss = loss_fn.bce_dice_loss(label, output, logits)                 
+                    loss = loss_fn.bce_dice_loss(label, output, logits)
+#                    loss = loss_fn.loss(label, logits)
             gradients = gen_tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             if discriminator: 
@@ -346,6 +346,7 @@ def train():
         def val_step(image, label):
             logits, output = model(image, False)
             t_loss = loss_fn.bce_dice_loss(label, output, logits)
+#            t_loss = loss_fn.loss(label, logits)
             val_loss(t_loss)
             if params.channel_axis == 1:
                 output = tf.transpose(output, (0, 1, 3, 4, 2))
@@ -359,6 +360,7 @@ def train():
         def test_step(image, label):
             logits, output = model(image, False)
             tt_loss = loss_fn.bce_dice_loss(label, output, logits)
+#            tt_loss = loss_fn.loss(label, logits)
             test_loss(tt_loss)
             if params.channel_axis == 1:
                 output = tf.transpose(output, (0, 1, 3, 4, 2))
@@ -373,6 +375,7 @@ def train():
         def best_test_step(image, label):
             logits, output = model(image, False)
             tt_loss = loss_fn.bce_dice_loss(label, output, logits)
+#            tt_loss = loss_fn.loss(label, logits)
             test_loss(tt_loss)
             if params.channel_axis == 1:
                 output = tf.transpose(output, (0, 1, 3, 4, 2))
@@ -494,9 +497,8 @@ def train():
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train', False, None, None)
+                image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train', False, None)
 #                show_dataset_labels(image_sequence, seg_sequence)
-                
                 train_output_sequence, train_loss_value= train_step(image_sequence, seg_sequence)    
                 train_bw_predictions = post_processing(train_output_sequence[:, -1])
                 
@@ -533,7 +535,7 @@ def train():
                     
                     #validation
                     for i in range(0, step_val):
-                        (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None, None)                      
+                        (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None)                      
                         #if profile is true, write on tensorboard the network graph
                         if params.profile:
                             graph_dir = os.path.join(params.experiment_log_dir, 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")

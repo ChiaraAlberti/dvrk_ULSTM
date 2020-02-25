@@ -8,6 +8,8 @@ import scipy
 from sklearn.model_selection import train_test_split
 from skimage import transform
 import imgaug.augmenters as iaa
+from scipy.ndimage.interpolation import map_coordinates
+from scipy.ndimage.filters import gaussian_filter
 
 class CTCRAMReaderSequence2D(object):
     def __init__(self, sequence_folder_list, image_crop_size=(128, 128), image_reshape_size=(128,128), unroll_len=7, batch_size=4,
@@ -46,6 +48,19 @@ class CTCRAMReaderSequence2D(object):
         img_mean = image.mean()
         out_img = (image - img_mean) * factor + img_mean
         return out_img
+    
+    @staticmethod
+    def get_indices(shape, alpha, sigma, random_state=None):
+    
+        random_state = np.random.RandomState(None)          
+        dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0) * alpha
+        dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0) * alpha
+    #    dz = np.zeros_like(dx)
+    
+        x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
+        indices = np.reshape(y+dy, (-1, 1)), np.reshape(x+dx, (-1, 1))
+        
+        return indices
     
     
     def split_k_fold(self, kf):
@@ -100,7 +115,7 @@ class CTCRAMReaderSequence2D(object):
         return q, q_best, q_train, q_val
     
     #create the batch of images and apply data augmentation
-    def read_batch(self, flag, kfold, train_index, test_index):
+    def read_batch(self, flag, kfold, list_index):
         if len(self.metadata['shape'])== 3:
             img_size = self.reshape_size + (self.metadata['shape'][-1],)
             all_images = []
@@ -110,7 +125,7 @@ class CTCRAMReaderSequence2D(object):
         all_seg = []
         if flag == 'train':
             if kfold == True:              
-                valid_masks = [i for i in train_index if i not in self.used_masks_train]
+                valid_masks = [i for i in list_index if i not in self.used_masks_train]
             else:                
                 valid_masks = [i for i in self.valid_list_train if i not in self.used_masks_train]
             batch_index = random.sample(valid_masks, self.batch_size)
@@ -118,7 +133,7 @@ class CTCRAMReaderSequence2D(object):
             valid_future_masks = [i for i in valid_masks if i not in self.used_masks_train]
         else:
             if kfold == True:
-                valid_masks = [i for i in self.valid_list_val if i not in self.used_masks_val]
+                valid_masks = [i for i in list_index if i not in self.used_masks_val]
             else:
                 valid_masks = [i for i in self.valid_list_val if i not in self.used_masks_val]
             batch_index = random.sample(valid_masks, self.batch_size)
@@ -152,12 +167,13 @@ class CTCRAMReaderSequence2D(object):
             crop_x_stop = crop_x + self.sub_seq_size[1]
             flip = np.random.randint(0, 2, 2) if self.randomize else [0, 0]
             rotate = np.random.randint(0, 4) if self.randomize else 0
-            dir_seq = random.choice(['forward', 'backward'])
+            dir_seq = random.choice(['forward', 'backward']) if self.randomize else 1
 #            dir_seq = 'backward'
-#            jump = np.random.randint(1,4) if self.randomize else 1
-            jump = 1 
+            jump = np.random.randint(1,4) if self.randomize else 1
+#            jump = 1 
 #            shear_matrix = transform.AffineTransform(shear=np.random.uniform(-0.3,0.3))
-            perspective = iaa.PerspectiveTransform(scale=(0.01, 0.1))
+#            perspective = iaa.PerspectiveTransform(scale=(0.01, 0.1))
+            indices = self.get_indices(self.reshape_size, self.reshape_size[0]*3, self.reshape_size[0]*0.15)
             
             if self.width_shift_range or self.height_shift_range:
                 if self.width_shift_range:
@@ -216,8 +232,10 @@ class CTCRAMReaderSequence2D(object):
                     
 #                    img_crop = transform.warp(img_crop, inverse_map=shear_matrix)
 #                    seg_crop = transform.warp(seg_crop, inverse_map=shear_matrix)
-                    img_crop = perspective(images=img_crop)
-                    seg_crop = perspective(images = seg_crop)
+#                    img_crop = perspective(images=img_crop)
+#                    seg_crop = perspective(images = seg_crop)
+                    img_crop = map_coordinates(img_crop, indices, order=1, mode='reflect').reshape(img_crop.shape)
+                    seg_crop = map_coordinates(seg_crop, indices, order=1, mode='reflect').reshape(seg_crop.shape)                  
                     img_crop = scipy.ndimage.shift(img_crop, [width_shift_range, height_shift_range])
                     seg_crop = scipy.ndimage.shift(seg_crop, [width_shift_range, height_shift_range])
                 thresh, seg_crop = cv2.threshold(seg_crop,0.5,1,cv2.THRESH_BINARY)
