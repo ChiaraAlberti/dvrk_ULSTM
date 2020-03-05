@@ -2,10 +2,10 @@ import argparse
 import os
 import pickle
 # noinspection PyPackageRequirements
-import Networks_our as Nets
-import Params_our as Params
+import NewNet as Nets
+import Params
 import tensorflow as tf
-import DataHandeling_modified as DataHandeling
+import DataHandeling
 import sys
 from utils import log_print
 import requests
@@ -13,12 +13,12 @@ import cv2
 from tensorflow.python.keras import losses
 import time 
 import numpy as np
-import pandas as pd
 from netdict import Net_type
 import csv 
 import matplotlib.pyplot as plt
 from datetime import datetime
 from sklearn.model_selection import KFold
+from sklearn.model_selection import train_test_split
 
 try:
     # noinspection PyPackageRequirements
@@ -37,15 +37,15 @@ METRICS_TRAIN = [
       k.metrics.Recall(name='recall_train'),
 ]
 
-#METRICS_VAL = [
-#      k.metrics.TruePositives(name='tp_val'),
-#      k.metrics.FalsePositives(name='fp_val'),
-#      k.metrics.TrueNegatives(name='tn_val'),
-#      k.metrics.FalseNegatives(name='fn_val'), 
-#      k.metrics.BinaryAccuracy(name='accuracy_val'),
-#      k.metrics.Precision(name='precision_val'),
-#      k.metrics.Recall(name='recall_val'),
-#]
+METRICS_VAL = [
+      k.metrics.TruePositives(name='tp_val'),
+      k.metrics.FalsePositives(name='fp_val'),
+      k.metrics.TrueNegatives(name='tn_val'),
+      k.metrics.FalseNegatives(name='fn_val'), 
+      k.metrics.BinaryAccuracy(name='accuracy_val'),
+      k.metrics.Precision(name='precision_val'),
+      k.metrics.Recall(name='recall_val'),
+]
 
 METRICS_TEST = [
       k.metrics.TruePositives(name='tp_test'),
@@ -108,6 +108,8 @@ class JaccardIndex() :
     def loss(self, y_true, y_pred):
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
+        y_true = tf.reshape(y_true, [-1])
+        y_pred = tf.reshape(y_pred, [-1])
         y_pred = tf.cast(tf.math.greater(y_pred, 0.5), tf.float32)
         intersection = tf.reduce_sum(tf.abs(y_true * y_pred), axis=-1)
         sum_ = tf.reduce_sum(tf.abs(y_true) + tf.abs(y_pred), axis=-1)
@@ -138,47 +140,40 @@ def train(train_index, test_index, kfold_dir):
         #Initialization of the data
         data_provider = params.data_provider
         #Initialization of the model 
-        dropout = 0.2
-        drop_input = False
+        recurrent_dropout = 0.3
+        dropout = 0.3
         l1 = 0
         l2 = 0
         kernel_init = 'he_uniform'
         net_type = 'original_net'
         pretraining = False
-        if not pretraining:
-            lrate = 0.0001
-            lr_decay = 0.1
-        else:
-            lrate  = 0.0001
-            lr_decay = 0.005
         pretraining_type = 'full'
-        step_per_epoch = data_provider.num_steps_per_epoch
-        step_val = data_provider.num_steps_per_val
-        step_gif = step_per_epoch*50
         num_epoch = 0
-        patience = 1000
         discriminator = False
         attention_gate = False
         
-        net_kernel_params = Net_type(dropout, (l1, l2), kernel_init)[net_type]
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, drop_input, pretraining, pretraining_type, attention_gate)
+        net_kernel_params = Net_type(recurrent_dropout, (l1, l2), kernel_init)[net_type]
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, dropout, pretraining, pretraining_type, attention_gate)
 #        if pretraining != False: 
 #            model = TrainableLayers(model, pretraining_type)
         if discriminator:
             disc = Nets.Discriminator(params.data_format)
         #Initialization of Losses and Metrics
         loss_fn = LossFunction()
+        jaccard = JaccardIndex()
 #        loss_fn = WeightedLoss()
         train_loss = k.metrics.Mean(name='train_loss')
         train_metrics = METRICS_TRAIN
-#        val_loss = k.metrics.Mean(name='val_loss')
-#        val_metrics = METRICS_VAL
+        val_loss = k.metrics.Mean(name='val_loss')
+        val_metrics = METRICS_VAL
         test_loss = k.metrics.Mean(name = 'test_loss')
+        test_jindx = k.metrics.Mean(name = 'jaccard_index')
         test_metrics = METRICS_TEST
-        final_train_loss = 0
         final_test_loss = 0
-        final_train_prec = 0
         final_test_prec = 0
+        final_test_acc = 0
+        final_test_rec = 0
+        final_test_jac = 0
         
         # Save Checkpoints
 
@@ -223,6 +218,8 @@ def train(train_index, test_index, kfold_dir):
         
         
         optimizer = tf.keras.optimizers.Adam(learning_rate=decay_lr())
+        if discriminator: 
+            optimizer_disc = tf.keras.optimizers.Adam(learning_rate=decay_lr())
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
         if params.load_checkpoint:
             if os.path.isdir(params.load_checkpoint_path):
@@ -249,33 +246,63 @@ def train(train_index, test_index, kfold_dir):
 
         @tf.function
         def train_step(image, label): 
-            with tf.GradientTape() as tape:
-                predictions, softmax = model(image, True)
-                loss, dice_loss, bce_loss = loss_fn.bce_dice_loss(label, softmax)
-            gradients = tape.gradient(loss, model.trainable_variables)
+            with tf.GradientTape() as gen_tape: #, tf.GradientTape() as disc_tape:
+                logits, output = model(image, True)
+                if discriminator:
+                    real = disc(label[:,-1])
+                    fake = disc(output[:, -1])
+                    d_loss = tf.reduce_mean(tf.math.log(real) + tf.math.log(1-fake))
+                    loss = loss_fn.bce_dice_loss(label, output, logits)
+#                    loss = loss_fn.loss(label, logits)
+                else: 
+                    loss = loss_fn.bce_dice_loss(label, output, logits)
+#                    loss = loss_fn.loss(label, logits)
+            gradients = gen_tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+            if discriminator: 
+                gradients_disc = disc_tape.gradient(d_loss, disc.trainable_variables)
+                optimizer_disc.apply_gradients(zip(gradients_disc, disc.trainable_variables))
             ckpt.step.assign_add(1)
             train_loss(loss)
             if params.channel_axis == 1:
-                predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
+                output = tf.transpose(output, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(train_metrics):
-                metric(label[:, -1], softmax[:,-1])
+                metric(label[:, -1], output[:,-1])
                 train_metrics[i] = metric
-            return softmax, predictions, loss
+            return output, loss
+
+
+        @tf.function
+        def val_step(image, label):
+            logits, output = model(image, False)
+            t_loss = loss_fn.bce_dice_loss(label, output, logits)
+#            t_loss = loss_fn.loss(label, logits)
+            val_loss(t_loss)
+            if params.channel_axis == 1:
+                output = tf.transpose(output, (0, 1, 3, 4, 2))
+                label = tf.transpose(label, (0, 1, 3, 4, 2))
+            for i, metric in enumerate(val_metrics):
+                metric(label[:, -1], output[:, -1])
+                val_metrics[i] = metric
+            return output, t_loss
 
         @tf.function
         def test_step(image, label):
-            predictions, softmax = model(image, False)
-            t_loss, t_dice_loss, t_bce_loss = loss_fn.bce_dice_loss(label, softmax)
-            test_loss(t_loss)
+            logits, output = model(image, False)
+            tt_loss = loss_fn.bce_dice_loss(label, output, logits)
+#            tt_loss = loss_fn.loss(label, logits)
+            test_loss(tt_loss)
             if params.channel_axis == 1:
-                predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
+                output = tf.transpose(output, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
+            test_loss(tt_loss)
             for i, metric in enumerate(test_metrics):
-                metric(label[:, -1], softmax[:, -1])
+                metric(label[:, -1], output[:, -1])
                 test_metrics[i] = metric
-            return softmax, predictions, t_loss
+            jaccard_ind = jaccard.loss(label, output)
+            test_jindx(jaccard_ind)
+            return output, tt_loss
                        
         template = '{}: Step {}, Loss: {}, Accuracy: {}, Precision: {}, Recall: {}'
         
@@ -284,7 +311,11 @@ def train(train_index, test_index, kfold_dir):
             # if True:
 #            val_states = model.get_states()
             log_print('Starting of epoch: {}'.format(int(num_epoch)))
+            training_index, val_index = train_test_split(train_index, test_size = 0.2)
+            step_per_epoch =  int(np.floor(len(training_index)/params.batch_size))
+            step_val = int(np.floor(len(val_index)/params.batch_size))
             progbar = tf.keras.utils.Progbar(step_per_epoch)
+            val_history = []
 
             for _ in range(int(ckpt.step), params.num_iterations + 1):
                 if params.aws:
@@ -292,9 +323,9 @@ def train(train_index, test_index, kfold_dir):
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, is_last_batch = train_data_provider.read_batch('train', k_fold = True, train_index)
+                image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train', True, training_index)
                 
-                train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)
+                train_output_sequence, train_loss_value= train_step(image_sequence, seg_sequence)
                 
                 progbar.update(int(ckpt.step)- num_epoch*step_per_epoch)
                 
@@ -311,23 +342,13 @@ def train(train_index, test_index, kfold_dir):
                 if not int(ckpt.step) % step_per_epoch:
                     
                     #validation
-#                    for i in range(0, step_val):
-#                        (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None, None)                      
-#                        #if profile is true, write on tensorboard the network graph
-#                        if params.profile:
-#                            graph_dir = os.path.join(params.experiment_log_dir, 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
-#                            tf.summary.trace_on(graph=True, profiler=True)
-#                            graph_summary_writer = tf.summary.create_file_writer(graph_dir)
-#                    
-#                        val_output_sequence, val_loss_value= val_step(val_image_sequence,
-#                                                                      val_seg_sequence)
-#                        if params.profile:
-#                            with graph_summary_writer.as_default():
-#                                tf.summary.trace_export('train_step', step=int(ckpt.step),
-#                                                        profiler_outdir=params.experiment_log_dir)
-#                        val_bw_predictions = post_processing(val_output_sequence[:, -1])
-                                                        
+                    for i in range(0, step_val):
+                        (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', True, val_index)                      
+                        val_output_sequence, val_loss_value= val_step(val_image_sequence,
+                                                                      val_seg_sequence)                                                        
                     
+                    val_dict = {'Accuracy ': np.array(val_metrics[4].result()) * 100, 'Precision':  np.array(val_metrics[5].result()) * 100, 'Recall':  np.array(val_metrics[6].result()) * 100}
+                    val_history.append(val_dict)
                     #print training values to console 
                     log_print(template.format('Training', int(ckpt.step),
                           train_loss.result(),
@@ -340,15 +361,15 @@ def train(train_index, test_index, kfold_dir):
                     train_loss.reset_states()
             
                     #print validation values to console
-#                    log_print(template.format('Validation', int(ckpt.step),
-#                                              val_loss.result(),
-#                                              val_metrics[4].result() * 100, val_metrics[5].result() * 100, 
-#                                              val_metrics[6].result() * 100))
-#                    
-#                    #reset metrics                     
-#                    for i in range(0, 7):
-#                        val_metrics[i].reset_states()
-#                    val_loss.reset_states()
+                    log_print(template.format('Validation', int(ckpt.step),
+                                              val_loss.result(),
+                                              val_metrics[4].result() * 100, val_metrics[5].result() * 100, 
+                                              val_metrics[6].result() * 100))
+                    
+                    #reset metrics                     
+                    for i in range(0, 7):
+                        val_metrics[i].reset_states()
+                    val_loss.reset_states()
                     
                     num_epoch = num_epoch +1
                     log_print('Starting of epoch: {}'.format(int(num_epoch)))
@@ -359,8 +380,9 @@ def train(train_index, test_index, kfold_dir):
 
                     #create the dataset
                     num_testing = int(np.floor(len(test_index) / params.batch_size))
+                    data_provider.enqueue_index('test', test_index)
                     for i in range(0, num_testing):
-                        image_seq, seg_seq = data_provider.read_batch('val', k_fold = True, test_index)
+                        image_seq, seg_seq = data_provider.read_new_image('test')
                         test_output_sequence, test_loss_value= test_step(image_seq, seg_seq)
                         log_print(template.format('Testing', int(i),
                                                   test_loss.result(),
@@ -370,12 +392,11 @@ def train(train_index, test_index, kfold_dir):
 #                            test_metrics[i].reset_states()
 #                        test_loss.reset_states()    
             
-                    final_train_loss = train_loss.result()
                     final_test_loss = test_loss.result()
-                    final_train_prec = train_metrics[5].result() * 100
                     final_test_acc = test_metrics[4].result() * 100
                     final_test_prec = test_metrics[5].result() * 100
                     final_test_rec = test_metrics[6].result() * 100
+                    final_test_jac = test_jindx.result()
                     
 
         except (KeyboardInterrupt, ValueError, AWSError) as err:
@@ -396,13 +417,20 @@ def train(train_index, test_index, kfold_dir):
                 with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(kfold_dir), 'model_params.pickle'), 'wb') as fobj:
                     pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
                                 fobj, protocol=pickle.HIGHEST_PROTOCOL)
+                    
                 #save parameters values and final loss and precision values 
-                with open(os.path.join(params.experiment_save_dir, 'metrics_list.csv'), 'w') as fobj:
+                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(kfold_dir), 'metrics_list.csv'), 'w') as fobj:
                     writer = csv.writer(fobj)
-                    model_dict = {'Loss': final_test_loss, 'Accuracy': final_test_acc, 
-                                  'Precision': final_test_prec, 'Recall': final_test_rec}
+                    model_dict = {'Loss': np.array(final_test_loss), 'Accuracy': np.array(final_test_acc), 
+                                  'Precision': np.array(final_test_prec), 'Recall': np.array(final_test_rec), 
+                                  'Jaccard': np.array(final_test_jac)}
                     for key, value in model_dict.items():
                        writer.writerow([key, value])
+                       
+                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(kfold_dir), 'val_history.csv'), 'w') as f: 
+                    writer = csv.DictWriter(f, val_history[0].keys())
+                    writer.writeheader()
+                    writer.writerows(val_history)
                 log_print('Saved Model to file: {}'.format(model_fname))
                 end_time = time.time()
                 log_print('Program execution time:', end_time - start_time)                
@@ -415,7 +443,7 @@ def train(train_index, test_index, kfold_dir):
 if __name__ == '__main__':
 
     class AddNets(argparse.Action):
-        import Networks_our as Nets
+        import NewNet as Nets
 
         def __init__(self, option_strings, dest, **kwargs):
             super(AddNets, self).__init__(option_strings, dest, **kwargs)
@@ -528,13 +556,11 @@ if __name__ == '__main__':
     complete_dict = []
     
     kf = KFold(n_splits=10)
-    train_seq, test_seq = DataHandeling.split_k_fold(kf)
+    train_seq, test_seq = params.data_provider.split_k_fold(kf)
     kfold_ind = 0
     
     for train_index, test_index in zip(train_seq, test_seq):
         train(train_index, test_index, kfold_ind)
-        
-
         with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(kfold_ind), 'metrics_list.csv')) as csv_file:
             reader = csv.reader(csv_file)
             model_dict = dict(reader)

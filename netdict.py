@@ -92,22 +92,19 @@ def Net_type(dropout, reg, kernel_init):
             },
             'small_net': {
                 'down_conv_kernels': [
-                    [(5, 32, 0, (0,0), kernel_init), (5, 32, dropout, (0,0), kernel_init)],
-                    [(5, 64, 0, (0,0), kernel_init), (5, 64, dropout, reg, kernel_init)],
                     [(5, 64, 0, (0,0), kernel_init), (5, 64, dropout, (0,0), kernel_init)],
                     [(5, 128, 0, (0,0), kernel_init), (5, 128, dropout, reg, kernel_init)],
+                    [(5, 256, 0, (0,0), kernel_init), (5, 256, dropout, reg, kernel_init)],
                 ],
                 'lstm_kernels': [
-                    [(5, 32, dropout, (0,0), kernel_init)],
-                    [(5, 64, dropout, reg, kernel_init)],
-                    [(5, 64, dropout, (0,0), kernel_init)],
-                    [(5, 128, dropout, reg, kernel_init)],
+                    [(5, 64, 0, (0,0), kernel_init)],
+                    [(5, 128, 0, (0,0), kernel_init)],
+                    [(5, 256, dropout, reg, kernel_init)],
                 ],
                 'up_conv_kernels': [
+                    [(5, 256, 0, (0,0), kernel_init), (5, 256, dropout, (0,0), kernel_init)],
                     [(5, 128, 0, (0,0), kernel_init), (5, 128, dropout, (0,0), kernel_init)],
-                    [(5, 64, 0, (0,0), kernel_init), (5, 64, dropout, reg, kernel_init)],
-                    [(5, 64, 0, (0,0), kernel_init), (5, 64, dropout, (0,0), kernel_init)],
-                    [(5, 32, 0, (0,0), kernel_init), (5, 32, dropout, reg, kernel_init), (1, 1, dropout, reg, kernel_init)],
+                    [(5, 64, 0, (0,0), kernel_init), (5, 64, dropout, reg, kernel_init), (1, 1, dropout, reg, kernel_init)],
                 ],
             },
             'shorter_net': {

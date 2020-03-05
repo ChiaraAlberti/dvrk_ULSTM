@@ -6,7 +6,7 @@ import argparse
 import os
 import pickle
 # noinspection PyPackageRequirements
-import Networks as Nets
+import NewNet as Nets
 import Params
 import tensorflow as tf
 import DataHandeling
@@ -23,7 +23,7 @@ import csv
 import matplotlib.pyplot as plt
 from datetime import datetime
 from array2gif import write_gif
-
+from PIL import Image
 
 
 try:
@@ -172,7 +172,7 @@ def train():
         pretraining_type = 'full'
         step_per_epoch = data_provider.num_steps_per_epoch
         step_val = data_provider.num_steps_per_val
-        step_gif = step_per_epoch*50
+        step_gif = step_per_epoch*10
         num_epoch = 0
         patience = 1000
         discriminator = False
@@ -484,7 +484,7 @@ def train():
             output_batch_list = {}
             for i in range(0, params.batch_size):
                 output_batch_list[str(i)] = []
-
+            first = True
             
             log_print('Starting of epoch: {}'.format(int(num_epoch)))
             progbar = tf.keras.utils.Progbar(step_per_epoch)
@@ -615,6 +615,18 @@ def train():
                 
                 if not int(ckpt.step) % step_gif:
                     image_seq, seg_seq = data_provider.read_new_image('epoch_test')
+                    if first:
+                        for i in range(0, image_seq.shape[0]):
+                            image = np.squeeze(np.array(image_seq[i, -1]))
+                            image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
+                            img = Image.fromarray(image.astype(np.uint8))
+                            img.save(params.experiment_save_dir + '/image' + str(i) + '.png')
+                            seg = np.squeeze(np.array(seg_seq[i, -1]))
+                            seg = cv2.normalize(seg, None, 0, 255, cv2.NORM_MINMAX)
+                            seg = Image.fromarray(seg.astype(np.uint8))
+                            seg.save(params.experiment_save_dir + '/label' + str(i) + '.png')
+                        first = False
+                            
                     output = test_epoch(image_seq)
                     
                     for i in range(0, image_seq.shape[0]):
@@ -625,6 +637,8 @@ def train():
                         image = np.moveaxis(image, -1, 0)
                         output_batch_list[str(i)].append(image)                   
                         write_gif(output_batch_list[str(i)], params.experiment_save_dir + '/prediction' + str(i) + '.gif', fps=5)
+                    if num_epoch == 200:
+                        step_gif = step_per_epoch*50
 
                 #save checkpoints
                 if int(ckpt.step) % params.save_checkpoint_iteration == 0 or int(ckpt.step) == params.num_iterations:
@@ -649,7 +663,7 @@ def train():
                     minimum_found = True
                     #create the dataset
                     num_testing = data_provider.num_test()
-                    data_provider.enqueue_index('best_test')
+                    data_provider.enqueue_index('best_test', None)
                     for i in range(0, num_testing):
                         image_seq, seg_seq = data_provider.read_new_image('best_test')
                         best_test_output_sequence, best_test_loss_value= best_test_step(image_seq, seg_seq)
@@ -679,7 +693,7 @@ def train():
                     final_val_prec = train_metrics[5].result() * 100
                     #create the dataset
                     num_testing = data_provider.num_test()
-                    data_provider.enqueue_index('test')
+                    data_provider.enqueue_index('test', None)
                     for i in range(0, num_testing):
                         image_seq, seg_seq = data_provider.read_new_image('test')
                         test_output_sequence, test_loss_value= test_step(image_seq, seg_seq)
@@ -722,7 +736,7 @@ def train():
                 with open(os.path.join(params.experiment_save_dir, 'params_list.csv'), 'w') as fobj:
                     writer = csv.writer(fobj)
                     model_dict = {'Pretraining': pretraining, 'Mode': pretraining_type, 'Stopping_epoch': stopped_epoch, 'Attention gate': attention_gate,
-                                  'Dropout': dropout, 'Drop_input': drop_input, 'L1': l1, 'L2': l2, 
+                                  'Dropout': dropout, 'Recurrent dropout': recurrent_dropout, 'L1': l1, 'L2': l2, 
                                   'Kernel init': kernel_init, 'Net type': net_type, 'Learning rate': lrate, 
                                   'Lr decay': lr_decay}
                     model_dict.update({'Train_loss': final_train_loss, 'Train_precision': final_train_prec,
@@ -741,7 +755,7 @@ def train():
 if __name__ == '__main__':
 
     class AddNets(argparse.Action):
-        import Networks as Nets
+        import NewNet as Nets
 
         def __init__(self, option_strings, dest, **kwargs):
             super(AddNets, self).__init__(option_strings, dest, **kwargs)

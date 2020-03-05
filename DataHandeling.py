@@ -28,8 +28,9 @@ class CTCRAMReaderSequence2D(object):
         self.height_shift_range = 0.05
         self.used_masks_train = []
         self.used_masks_val = []
+        self.used_masks_val = []
         self.mode = 'random'
-        np.random.seed(1)
+#        np.random.seed(1)
         #initialization of the different parts of dataset
         self.valid_list_train, self.valid_list_val, self.valid_list_test, self.metadata = self._dataset_split(self.mode)
         self.num_steps_per_epoch = int(np.floor(len(self.valid_list_train)/self.batch_size))
@@ -69,7 +70,14 @@ class CTCRAMReaderSequence2D(object):
             metadata = pickle.load(fobj)
         filename_list = metadata['filelist']
         valid_masks = [i for i, x in enumerate(filename_list) if x[1] != 'None']
-        valid_list_train, valid_list_test = kf.split(valid_masks)
+        random.shuffle(valid_masks)
+        valid_masks_array = np.array(valid_masks)
+        valid_list_train = []
+        valid_list_test = []
+        for train_index, test_index in kf.split(valid_masks_array):
+            X_train, X_test = valid_masks_array[train_index], valid_masks_array[test_index]
+            valid_list_train.append(X_train)
+            valid_list_test.append(X_test)
         return valid_list_train, valid_list_test
         
     #calculate the number of iterations for each epoch
@@ -266,13 +274,18 @@ class CTCRAMReaderSequence2D(object):
 
     
     #enqueue the index of the test sets    
-    def enqueue_index(self, type_test):
-        if type_test == 'best_test':
-            for i in range(0, len(self.valid_list_test)):
-                self.q_best.enqueue(self.valid_list_test[i])
+    def enqueue_index(self, type_test, test_index):
+        if test_index is None:
+            if type_test == 'best_test':
+                for i in range(0, len(self.valid_list_test)):
+                    self.q_best.enqueue(self.valid_list_test[i])
+            else:
+                for i in range(0, len(self.valid_list_test)):
+                    self.q.enqueue(self.valid_list_test[i])
         else:
-            for i in range(0, len(self.valid_list_test)):
-                self.q.enqueue(self.valid_list_test[i])
+            self.q = tf.queue.FIFOQueue(len(test_index), dtypes = tf.float32, shapes = ())
+            for i in range(0, len(test_index)):
+                self.q.enqueue(test_index[i])
     
     #read the images in order to test     
     def read_new_image(self, type_test):
@@ -312,4 +325,33 @@ class CTCRAMReaderSequence2D(object):
         seg_batch = tf.expand_dims(seg_batch, 4)
 
         return image_batch, seg_batch
+    
+    
+    #read the images in order to test     
+    def read_real_time(self):
+        index = self.q.dequeue()
+        image_seq = []
+        seg_seq = []
+        for i in range(0, self.unroll_len):
+            img = cv2.imread(os.path.join(self.sequence_folder, 'train', self.metadata['filelist'][index - (self.unroll_len - i - 1)][0]), -1)
+            img = cv2.resize(img, self.reshape_size, interpolation = cv2.INTER_AREA)
+            if img is None:
+                raise ValueError('Could not load image: {}'.format(os.path.join(self.sequence_folder, self.metadata['filelist'][index - (self.unroll_len - i - 1)][0])))
+            img = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+            if self.metadata['filelist'][index - (self.unroll_len - i - 1)][1] == 'None':
+                seg = np.ones(img.shape[:2]).astype(np.float32) * (0)
+            else:
+                seg =cv2.imread(os.path.join(self.sequence_folder, 'labels', self.metadata['filelist'][index - (self.unroll_len - i - 1)][1]), -1)
+                seg = cv2.resize(seg, self.reshape_size, interpolation = cv2.INTER_AREA)
+                seg = cv2.normalize(seg.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+                thresh, seg = cv2.threshold(seg,0.5,1,cv2.THRESH_BINARY)
+            image_seq.append(img)
+            seg_seq.append(seg)
+        
+        image_seq = tf.expand_dims(image_seq, 0)
+        seg_seq = tf.expand_dims(seg_seq, 0)
+        image_seq = tf.expand_dims(image_seq, 4)
+        seg_seq = tf.expand_dims(seg_seq, 4)
+
+        return image_seq, seg_seq
         
