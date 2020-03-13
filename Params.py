@@ -3,7 +3,7 @@ import DataHandeling
 import os
 from datetime import datetime
 
-ROOT_DATA_DIR = '/home/stormlab/seg/lstm_dataset_complete'
+ROOT_DATA_DIR = '/home/stormlab/seg/lstm_dataset_extend'
 ROOT_TEST_DATA_DIR = '/home/stormlab/seg/Test'
 ROOT_SAVE_DIR = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained'
 
@@ -23,7 +23,7 @@ class ParamsBase(object):
 
 class CTCParams(ParamsBase):
     # --------General-------------
-    experiment_name = 'MyRun_SIM'
+    experiment_name = 'SingleRun'
     gpu_id = 0  # set -1 for CPU or GPU index for GPU.
 
     #  ------- Data -------
@@ -31,14 +31,14 @@ class CTCParams(ParamsBase):
     root_data_dir = ROOT_DATA_DIR
     crop_size = (64, 64)  # (height, width) preferably height=width 
     reshape_size = (64, 64)
-    batch_size = 30
+    batch_size = 15
     unroll_len = 5
     data_format = 'NHWC' # either 'NCHW' or 'NHWC'
     class_weights = [0.4, 0.6]
 
 
     # -------- Training ----------
-    num_iterations = 8000
+    num_iterations = 15000
     validation_interval = 8
     print_to_console_interval = 10
 
@@ -52,7 +52,6 @@ class CTCParams(ParamsBase):
     save_checkpoint_max_to_keep = 5
 
     # ---------Tensorboard-------------
-    tb_sub_folder = 'LSTMUNet'
     write_to_tb_interval = 10
     save_log_dir = ROOT_SAVE_DIR
 
@@ -83,7 +82,7 @@ class CTCParams(ParamsBase):
 
 
         now_string = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-#        now_string = 'HP_tuning_models'
+        k_fold = True
         
         #initialization of the various dir folders
         if self.load_checkpoint and self.continue_run:
@@ -97,16 +96,20 @@ class CTCParams(ParamsBase):
                 save_dir = os.path.dirname(os.path.dirname(self.load_checkpoint_path))
                 self.experiment_log_dir = self.experiment_save_dir = save_dir
                 self.load_checkpoint_path = os.path.join(self.load_checkpoint_path, 'tf-ckpt')
-                self.experiment_k_fold_dir = os.path.join(self.save_checkpoint_dir, self.tb_sub_folder, 'k_fold')
+                self.experiment_k_fold_dir = os.path.join(self.save_checkpoint_dir, 'Kfold', now_string)
         else:
-            self.experiment_log_dir = os.path.join(self.save_log_dir, self.tb_sub_folder, self.experiment_name,
+            self.experiment_log_dir = os.path.join(self.save_log_dir, self.experiment_name,
                                                    now_string)
-            self.experiment_save_dir = os.path.join(self.save_checkpoint_dir, self.tb_sub_folder, self.experiment_name,
+            self.experiment_save_dir = os.path.join(self.save_checkpoint_dir, self.experiment_name,
                                                     now_string)
-            self.experiment_k_fold_dir = os.path.join(self.save_checkpoint_dir, self.tb_sub_folder, 'k_fold')
+            self.experiment_k_fold_dir = os.path.join(self.save_checkpoint_dir, 'Kfold', now_string)
         if not self.dry_run:
-            os.makedirs(self.experiment_log_dir, exist_ok=True)
-            os.makedirs(self.experiment_save_dir, exist_ok=True)
+            if k_fold:
+                os.makedirs(self.experiment_k_fold_dir, exist_ok=True)
+            else:
+                os.makedirs(self.experiment_log_dir, exist_ok=True)
+                os.makedirs(self.experiment_save_dir, exist_ok=True)
+
 
         self.channel_axis = 1 if self.data_format == 'NCHW' else 3
         if self.profile:

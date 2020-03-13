@@ -9,14 +9,10 @@ import DataHandeling
 import sys
 from utils import log_print
 import requests
-import cv2
-from tensorflow.python.keras import losses
 import time 
 import numpy as np
 from netdict import Net_type
 import csv 
-import matplotlib.pyplot as plt
-from datetime import datetime
 from sklearn.model_selection import KFold
 from sklearn.model_selection import train_test_split
 
@@ -27,6 +23,8 @@ except AttributeError:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
     import tensorflow.keras as k
 
+
+#defining metrics for training, validation and test
 METRICS_TRAIN = [
       k.metrics.TruePositives(name='tp_train'),
       k.metrics.FalsePositives(name='fp_train'),
@@ -69,7 +67,7 @@ start_time = time.time()
 class AWSError(Exception):
     pass
 
-#loss function: dice_loss + binary cross entropy loss
+#loss function: dice_loss + weighted binary cross entropy loss
 class LossFunction:
     def dice_coeff(self, y_true, y_pred):
         smooth = 1.
@@ -90,11 +88,12 @@ class LossFunction:
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
         logits = logits[:, -1]
-        bce_loss = tf.nn.weighted_cross_entropy_with_logits(y_true, logits, 0.8)
+        bce_loss = tf.nn.weighted_cross_entropy_with_logits(y_true, logits, 0.6)
         dice_loss = self.dice_loss(y_true, y_pred)
         loss = alpha*bce_loss + (1- alpha)*dice_loss
         return loss
 
+#loss weighted cross entropy
 class WeightedLoss():
     def loss(self, y_true, y_pred):
         y_true = y_true[:, -1]
@@ -115,6 +114,7 @@ class JaccardIndex() :
         sum_ = tf.reduce_sum(tf.abs(y_true) + tf.abs(y_pred), axis=-1)
         jac = intersection/sum_
         return jac
+
 
 class FocalTverskyLoss():
     def loss(self, y_true, y_pred):
@@ -139,7 +139,7 @@ def train(train_index, test_index, kfold_dir):
     with tf.device(device):
         #Initialization of the data
         data_provider = params.data_provider
-        #Initialization of the model 
+        #Initialization of the model and paramenters
         recurrent_dropout = 0.3
         dropout = 0.3
         l1 = 0
@@ -147,17 +147,19 @@ def train(train_index, test_index, kfold_dir):
         kernel_init = 'he_uniform'
         net_type = 'original_net'
         pretraining = False
-        pretraining_type = 'full'
+        lstm_type = 'full'
         num_epoch = 0
         discriminator = False
         attention_gate = False
         
+        #initialization neural network
         net_kernel_params = Net_type(recurrent_dropout, (l1, l2), kernel_init)[net_type]
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, dropout, pretraining, pretraining_type, attention_gate)
-#        if pretraining != False: 
-#            model = TrainableLayers(model, pretraining_type)
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, dropout, 
+                                pretraining, lstm_type, attention_gate)
+        
         if discriminator:
             disc = Nets.Discriminator(params.data_format)
+            
         #Initialization of Losses and Metrics
         loss_fn = LossFunction()
         jaccard = JaccardIndex()
@@ -174,53 +176,52 @@ def train(train_index, test_index, kfold_dir):
         final_test_acc = 0
         final_test_rec = 0
         final_test_jac = 0
-        
-        # Save Checkpoints
-
-#        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-#                initial_learning_rate = 0.0005, 
-#                decay_steps=100000,
-#                decay_rate=0.98, 
-#                staircase=True)
-
-
-        class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
-            def __init__(self):
-                print('Learning rate initialized')
-                
-            @tf.function   
-            def __call__(self, step):
-              if tf.less(step, 500):
-                return 0.0001
-              elif tf.logical_and(tf.greater(step, 500), tf.less(step, 2000)):
-                return 0.00005
-              elif tf.logical_and(tf.greater(step, 2000), tf.less(step, 5000)):
-                return 0.00001
-              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 10000)):
-                return 0.000005
-              elif tf.logical_and(tf.greater(step, 10000), tf.less(step, 20000)):
-                return 0.0000025
-              else:
-                return 0.000001
-            
-#        class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
-#            def __init__(self):
-#                print('Learning rate initialized')
-#                
-#            @tf.function   
-#            def __call__(self, step):
-#              if tf.less(step, 5000):
-#                return 0.00001
-#              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 8000)):
-#                return 0.000005
-#              else:
-#                return 0.000001        
+    
+        #define learning rate step decay
+        if lstm_type == 'enc':
+            class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
+                def __init__(self):
+                    print('Learning rate initialized')
+                    
+                @tf.function   
+                def __call__(self, step):
+                  if tf.less(step, 500):
+                    return 0.0001
+                  elif tf.logical_and(tf.greater(step, 500), tf.less(step, 2000)):
+                    return 0.00005
+                  elif tf.logical_and(tf.greater(step, 2000), tf.less(step, 5000)):
+                    return 0.00001
+                  elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 8000)):
+                    return 0.000005
+                  else:
+                    return 0.000001            
+        else: 
+            class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
+                def __init__(self):
+                    print('Learning rate initialized')
+                    
+                @tf.function   
+                def __call__(self, step):
+                  if tf.less(step, 700):
+                    return 0.0001
+                  elif tf.logical_and(tf.greater(step, 700), tf.less(step, 2800)):
+                    return 0.00005
+                  elif tf.logical_and(tf.greater(step, 2800), tf.less(step, 7000)):
+                    return 0.00001
+                  elif tf.logical_and(tf.greater(step, 7000), tf.less(step, 11200)):
+                    return 0.000005
+                  else:
+                    return 0.000001          
         
         
+        #Set optimizer
         optimizer = tf.keras.optimizers.Adam(learning_rate=decay_lr())
         if discriminator: 
             optimizer_disc = tf.keras.optimizers.Adam(learning_rate=decay_lr())
+        
+        #Checkpoint
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
+        #Load checkpoint if there is
         if params.load_checkpoint:
             if os.path.isdir(params.load_checkpoint_path):
                 latest_checkpoint = tf.train.latest_checkpoint(params.load_checkpoint_path)
@@ -308,10 +309,10 @@ def train(train_index, test_index, kfold_dir):
         
         log_print('Start of training')
         try:
-            # if True:
-#            val_states = model.get_states()
             log_print('Starting of epoch: {}'.format(int(num_epoch)))
+            #divide in train and val set
             training_index, val_index = train_test_split(train_index, test_size = 0.2)
+            #define number of train and val step per epoch
             step_per_epoch =  int(np.floor(len(training_index)/params.batch_size))
             step_val = int(np.floor(len(val_index)/params.batch_size))
             progbar = tf.keras.utils.Progbar(step_per_epoch)
@@ -322,9 +323,9 @@ def train(train_index, test_index, kfold_dir):
                     r = requests.get('http://169.254.169.254/latest/meta-data/spot/instance-action')
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
-
+                #read batch
                 image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train', True, training_index)
-                
+                #train batch
                 train_output_sequence, train_loss_value= train_step(image_sequence, seg_sequence)
                 
                 progbar.update(int(ckpt.step)- num_epoch*step_per_epoch)
@@ -338,15 +339,15 @@ def train(train_index, test_index, kfold_dir):
                     else:
                         log_print("WARNING: dry_run flag is ON! Mot saving checkpoints or tensorboard data")
 
-
+                #if epoch is finished
                 if not int(ckpt.step) % step_per_epoch:
-                    
-                    #validation
+                 
+                    #validation steps are performed
                     for i in range(0, step_val):
                         (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', True, val_index)                      
                         val_output_sequence, val_loss_value= val_step(val_image_sequence,
                                                                       val_seg_sequence)                                                        
-                    
+                    #validation metrics are stored in a dictionary
                     val_dict = {'Accuracy ': np.array(val_metrics[4].result()) * 100, 'Precision':  np.array(val_metrics[5].result()) * 100, 'Recall':  np.array(val_metrics[6].result()) * 100}
                     val_history.append(val_dict)
                     #print training values to console 
@@ -355,7 +356,7 @@ def train(train_index, test_index, kfold_dir):
                           train_metrics[4].result() * 100, train_metrics[5].result() * 100, 
                           train_metrics[6].result() * 100))
                         
-                    #reset metrics
+                    #reset train metrics 
                     for i in range(0, 7):
                         train_metrics[i].reset_states()
                     train_loss.reset_states()
@@ -366,7 +367,7 @@ def train(train_index, test_index, kfold_dir):
                                               val_metrics[4].result() * 100, val_metrics[5].result() * 100, 
                                               val_metrics[6].result() * 100))
                     
-                    #reset metrics                     
+                    #reset val metrics                     
                     for i in range(0, 7):
                         val_metrics[i].reset_states()
                     val_loss.reset_states()
@@ -375,12 +376,20 @@ def train(train_index, test_index, kfold_dir):
                     log_print('Starting of epoch: {}'.format(int(num_epoch)))
                     
                     progbar = tf.keras.utils.Progbar(step_per_epoch)
-
+                    
+                #when training is finished
                 if ckpt.step == params.num_iterations:
-
-                    #create the dataset
+                    #define number of test steps 
                     num_testing = int(np.floor(len(test_index) / params.batch_size))
+                    #create the dataset for test
                     data_provider.enqueue_index('test', test_index)
+                    #perform testing on new data
+#                    loss_list = []
+#                    acc_list = []
+#                    rec_list = []
+#                    prec_list = []
+#                    jacc_list = []
+                    
                     for i in range(0, num_testing):
                         image_seq, seg_seq = data_provider.read_new_image('test')
                         test_output_sequence, test_loss_value= test_step(image_seq, seg_seq)
@@ -388,15 +397,28 @@ def train(train_index, test_index, kfold_dir):
                                                   test_loss.result(),
                                                   test_metrics[4].result() * 100, test_metrics[5].result() * 100, 
                                                   test_metrics[6].result() * 100))
+#                        loss_list.append(test_loss.result())
+#                        acc_list.append(test_metrics[4].result() * 100)
+#                        rec_list.append(test_metrics[6].result() * 100)
+#                        prec_list.append(test_metrics[5].result() * 100)
+#                        jacc_list.append(test_jindx.result())
+                        
 #                        for i in range(0, 7):
 #                            test_metrics[i].reset_states()
-#                        test_loss.reset_states()    
-            
+#                        test_loss.reset_states()
+#                        test_jindx.reset_states()
+  
+                    #save test values
                     final_test_loss = test_loss.result()
                     final_test_acc = test_metrics[4].result() * 100
                     final_test_prec = test_metrics[5].result() * 100
                     final_test_rec = test_metrics[6].result() * 100
                     final_test_jac = test_jindx.result()
+#                    final_test_loss = np.mean(loss_list)
+#                    final_test_acc = np.mean(acc_list)
+#                    final_test_prec = np.mean(prec_list)
+#                    final_test_rec = np.mean(rec_list)
+#                    final_test_jac = np.mean(jacc_list)
                     
 
         except (KeyboardInterrupt, ValueError, AWSError) as err:
@@ -411,15 +433,16 @@ def train(train_index, test_index, kfold_dir):
             raise err
         finally:
             if not params.dry_run:
+                #save the model
                 log_print('Saving Model of inference:')
-                model_fname = os.path.join(params.experiment_save_dir, 'NN_'+ str(kfold_dir), 'model.ckpt'.format(int(ckpt.step)))
+                model_fname = os.path.join(params.experiment_k_fold_dir, 'NN_'+ str(kfold_dir), 'model.ckpt'.format(int(ckpt.step)))
                 model.save_weights(model_fname, save_format='tf')
-                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(kfold_dir), 'model_params.pickle'), 'wb') as fobj:
+                with open(os.path.join(params.experiment_k_fold_dir, 'NN_'+ str(kfold_dir), 'model_params.pickle'), 'wb') as fobj:
                     pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
                                 fobj, protocol=pickle.HIGHEST_PROTOCOL)
                     
                 #save parameters values and final loss and precision values 
-                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(kfold_dir), 'metrics_list.csv'), 'w') as fobj:
+                with open(os.path.join(params.experiment_k_fold_dir, 'NN_'+ str(kfold_dir), 'metrics_list.csv'), 'w') as fobj:
                     writer = csv.writer(fobj)
                     model_dict = {'Loss': np.array(final_test_loss), 'Accuracy': np.array(final_test_acc), 
                                   'Precision': np.array(final_test_prec), 'Recall': np.array(final_test_rec), 
@@ -427,7 +450,7 @@ def train(train_index, test_index, kfold_dir):
                     for key, value in model_dict.items():
                        writer.writerow([key, value])
                        
-                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(kfold_dir), 'val_history.csv'), 'w') as f: 
+                with open(os.path.join(params.experiment_k_fold_dir, 'NN_'+ str(kfold_dir), 'val_history.csv'), 'w') as f: 
                     writer = csv.DictWriter(f, val_history[0].keys())
                     writer.writeheader()
                     writer.writerows(val_history)
@@ -552,20 +575,21 @@ if __name__ == '__main__':
     args_dict = {key: val for key, val in vars(input_args).items() if not (val is None)}
     print(args_dict)
     params = Params.CTCParams(args_dict)
-    # params = Params.CTCParamsNoLSTM(args_dict)
+
     complete_dict = []
-    
+    #define the number of k folds 
     kf = KFold(n_splits=10)
+    #create the k train-test pairs
     train_seq, test_seq = params.data_provider.split_k_fold(kf)
     kfold_ind = 0
     
     for train_index, test_index in zip(train_seq, test_seq):
         train(train_index, test_index, kfold_ind)
-        with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(kfold_ind), 'metrics_list.csv')) as csv_file:
+        with open(os.path.join(params.experiment_k_fold_dir, 'NN_'+ str(kfold_ind), 'metrics_list.csv')) as csv_file:
             reader = csv.reader(csv_file)
             model_dict = dict(reader)
             complete_dict.append(model_dict)
-        with open(os.path.join(params.experiment_save_dir, 'kfold_metrics_list.csv'), 'w') as f: 
+        with open(os.path.join(params.experiment_k_fold_dir, 'kfold_metrics_list.csv'), 'w') as f: 
             writer = csv.DictWriter(f, complete_dict[0].keys())
             writer.writeheader()
             writer.writerows(complete_dict)

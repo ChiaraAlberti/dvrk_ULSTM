@@ -1,7 +1,4 @@
-#same content of "Networks.py" but the weights of each layer are initialized according to the pretrained model 
-#available at this link: https://drive.google.com/file/d/1uQOdelJoXrffmW_1OCu417nHKtQcH3DJ/view?usp=sharing
 import tensorflow as tf
-import pickle
 from typing import List
 from tensorflow.python.keras import regularizers
 import numpy as np
@@ -11,6 +8,7 @@ try:
 except AttributeError:
     import tensorflow.keras as k
 
+#class that define downsampling blocks
 class DownBlock2D(k.Model):
 
     def __init__(self, conv_kernels: List[tuple], lstm_kernels: List[tuple], data_format='NHWC', pretraining = False):
@@ -24,26 +22,29 @@ class DownBlock2D(k.Model):
         self.total_stride = 1
         self.pretraining = pretraining
         
+        #initialization of convLSTM2D layers
         for kxy_lstm, kout_lstm, dropout, reg, kernel_init in lstm_kernels:
             self.ConvLSTM.append(k.layers.ConvLSTM2D(filters=kout_lstm, kernel_size=kxy_lstm, strides=1,
                                  padding='same', data_format=data_format_keras, kernel_initializer=kernel_init,
                                  return_sequences=True, stateful=False, recurrent_dropout=dropout, 
                                  kernel_regularizer=regularizers.l1_l2(l1=reg[0], l2=reg[1])))
-
+        #initialization of Conv + Batch + ReLU
         for l_ind, (kxy, kout, dropout, reg, kernel_init) in enumerate(conv_kernels):
             self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=1, use_bias=True, kernel_initializer=kernel_init,
                              data_format=data_format_keras, padding='same',
                              kernel_regularizer=regularizers.l1_l2(l1=reg[0], l2=reg[1])))
             self.BN.append(k.layers.BatchNormalization(axis=channel_axis))
             self.LReLU.append(k.layers.LeakyReLU())
-            
+        
+        #initialization of maxpooling layer
         self.MaxPool =  k.layers.MaxPool2D(pool_size=(2, 2))
 
     def call(self, inputs, training=None, mask=None):
+        
         convlstm = inputs
         for conv_lstm_layer in self.ConvLSTM:
             convlstm = conv_lstm_layer(convlstm, training= training)
-        
+        #reshape in order to feed in the convolutional layers
         orig_shape = convlstm.shape
         conv_input = tf.reshape(convlstm, [orig_shape[0] * orig_shape[1], orig_shape[2], orig_shape[3], orig_shape[4]])
         activ = conv_input  # set input to for loop
@@ -79,19 +80,30 @@ class DownBlock2D(k.Model):
                 state = None
             convlstm_layer.reset_states(state)
 
+
+#class that define upsampling blocks
 class UpBlock2D(k.Model):
 
-    def __init__(self, kernels: List[tuple], up_factor=2, data_format='NHWC',  layer_ind_up = 0, pretraining =False, pretraining_type = 'full', return_logits=False):
+    def __init__(self, kernels: List[tuple], lstm_kernels: List[tuple], up_factor=2, data_format='NHWC',  layer_ind_up = 0, pretraining =False, return_logits=False):
         super(UpBlock2D, self).__init__()
         self.data_format_keras = 'channels_first' if data_format[1] == 'C' else 'channels_last'
         self.up_factor = up_factor
         self.channel_axis = 1 if data_format[1] == 'C' else -1
+        self.ConvLSTM = []
         self.Conv = []
         self.BN = []
         self.LReLU = []
         self.return_logits = return_logits
         self.pretraining = pretraining
         
+        if lstm_kernels is not None:
+            for kxy_lstm, kout_lstm, dropout, reg, kernel_init in lstm_kernels:
+                self.ConvLSTM.append(k.layers.ConvLSTM2D(filters=kout_lstm, kernel_size=kxy_lstm, strides=1,
+                                     padding='same', data_format=self.data_format_keras, kernel_initializer=kernel_init,
+                                     return_sequences=True, stateful=False, recurrent_dropout=dropout, 
+                                     kernel_regularizer=regularizers.l1_l2(l1=reg[0], l2=reg[1])))
+        
+        #initialization of Conv + Batch + ReLU
         for l_ind, (kxy, kout, dropout, reg, kernel_init) in enumerate(kernels):
             self.Conv.append(k.layers.Conv2D(filters=kout, kernel_size=kxy, strides=1, use_bias=True, kernel_initializer=kernel_init,
                              data_format=self.data_format_keras, padding='same',
@@ -100,11 +112,20 @@ class UpBlock2D(k.Model):
             self.LReLU.append(k.layers.LeakyReLU())
             
 
-    def call(self, inputs, training=None, mask=None):
+    def call(self, inputs, training=None, mask=None, shape = None):
         input_sequence, skip = inputs
+        #bilinear interpolation
         input_sequence = k.backend.resize_images(input_sequence, self.up_factor, self.up_factor, self.data_format_keras,
                                                  interpolation='bilinear')
+        #concatenation
         input_tensor = tf.concat([input_sequence, skip], axis=self.channel_axis)
+        
+        if len(self.ConvLSTM) != 0:            
+            lstm_input = tf.reshape(input_tensor, [shape[0], shape[1], input_tensor.shape[1], input_tensor.shape[2], input_tensor.shape[3]])
+            for conv_lstm_layer in self.ConvLSTM:
+                lstm_tensor = conv_lstm_layer(lstm_input, training= training)           
+            input_tensor = tf.reshape(lstm_tensor, [input_tensor.shape[0], lstm_tensor.shape[2], lstm_tensor.shape[3], lstm_tensor.shape[4]])
+            
         for conv_layer, bn_layer, lrelu_layer in zip(self.Conv, self.BN, self.LReLU):
             conv = conv_layer(input_tensor)
             if self.return_logits and conv_layer == self.Conv[-1]:
@@ -114,6 +135,7 @@ class UpBlock2D(k.Model):
             input_tensor = activ
         return input_tensor
     
+#class that define the gating signal, input for the attention gate
 class UnetGatingSignal(k.Model):
     def __init__(self, data_format='NHWC', num_layers = 256):
         super(UnetGatingSignal, self).__init__()
@@ -133,6 +155,7 @@ class UnetGatingSignal(k.Model):
         x = self.ReLU(x)                
         return x
 
+#class that define the attention gate block
 class AttnGatingBlock(k.Model):
     def __init__(self, data_format='NHWC', inter_shape= 256, num_filters= 128):
         super(AttnGatingBlock, self).__init__()
@@ -143,34 +166,33 @@ class AttnGatingBlock(k.Model):
         self.thetaConv =  k.layers.Conv2D(int(inter_shape), (2, 2), strides=(2, 2), padding='same')
         self.phiConv = k.layers.Conv2D(int(inter_shape), (1, 1), padding='same')
         self.psiConv = k.layers.Conv2D(1, (1, 1), padding='same')
-        self.resultConv = k.layers.Conv2D(num_filters, (1, 1), padding='same')
+        self.resultConv = k.layers.Conv2D(inter_shape, (1, 1), padding='same')
         self.batch = k.layers.BatchNormalization(axis = self.channel_axis)
 
     def call(self, x, g):
-        shape_x = x.shape # 32
-#        shape_g = g.shape  # 16
-#        print(shape_x)
-#        print(shape_g)
-        theta_x = self.thetaConv(x)  # 16
-#        shape_theta_x = theta_x.shape
+        shape_x = x.shape
+        #downsampling of the x signal
+        theta_x = self.thetaConv(x)
         phi_g = self.phiConv(g)
-        #upsample_g = k.layers.Conv2DTranspose(int(self.inter_shape), (5, 5),strides=(shape_theta_x[1] // shape_g[1], shape_theta_x[2] // shape_g[2]),padding='same')(phi_g)  # 16
+        #concatenation
         concat_xg = k.layers.add([phi_g, theta_x])
+        #ReLU activation
         act_xg = k.layers.ReLU()(concat_xg)
         psi = self.psiConv(act_xg)
+        #sigmoid activation
         sigmoid_xg = k.activations.sigmoid(psi)
         shape_sigmoid = sigmoid_xg.shape
+        #upsampling
         upsample_psi = k.layers.UpSampling2D(size=(shape_x[1] // shape_sigmoid[1], shape_x[2] // shape_sigmoid[2]))(sigmoid_xg)  # 32
-#        upsample_psi = k.layers.Lambda(lambda x, repnum: tf.keras.backend.repeat_elements(x, shape_x[3], axis=3), arguments={'repnum': shape_x[3]})(upsample_psi)
+        #multiplication between input and results of attention gate
         result = k.layers.multiply([upsample_psi, x])
-#        result = self.resultConv(y)
-#        result_bn = self.batch(result)
-#        print(result_bn.shape)
+        result = self.resultConv(result)
+        result = self.batch(result)
         return result
 
-
+#class that define the network architecture
 class ULSTMnet2D(k.Model):
-    def __init__(self, net_params=None, data_format='NHWC', pad_image=True, dropout= 0, pretraining = False, pretraining_type = 'full', attention_gate = False):
+    def __init__(self, net_params=None, data_format='NHWC', pad_image=True, dropout= 0, pretraining = False, lstm = 'full', attention_gate = False):
         super(ULSTMnet2D, self).__init__()
         self.data_format_keras = 'channels_first' if data_format[1] == 'C' else 'channels_last'
         self.channel_axis = 1 if data_format[1] == 'C' else -1
@@ -193,32 +215,40 @@ class ULSTMnet2D(k.Model):
             raise ValueError('Number of layers in down path ({}) do not match number of layers in up path ({})'.format(
                 len(net_params['down_conv_kernels']), len(net_params['up_conv_kernels'])))
 
+        #create a list of downsampling blocks
         for layer_ind, (conv_filters, lstm_filters) in enumerate(zip(net_params['down_conv_kernels'],
                                                                      net_params['lstm_kernels'])):
             self.DownLayers.append(DownBlock2D(conv_filters, lstm_filters, data_format, pretraining))
         
+        #bottleneck layer connecting the two branches
         self.ConnectLayer = k.layers.Conv2D(filters=512, kernel_size=3, strides=1, use_bias=True,
                                             data_format=self.data_format_keras, padding='same')
         
         self.Dropout = k.layers.Dropout(self.dropout_rate)  
         
+        #attention gate filter values
         if self.attention_gate:
-            for i in [256, 256, 128, 128]:
+            for i in [512, 256, 128, 128]:
                 self.GateSignal.append(UnetGatingSignal(data_format, i))
-            layers_num = 256
-            for i in [128, 128, 64, 1]:
-                self.AttentionBlock.append(AttnGatingBlock(data_format, layers_num, i))
-                layers_num = layers_num/2
-
-        for layer_ind, conv_filters in enumerate(net_params['up_conv_kernels']):
-            up_factor = 2
-            self.UpLayers.append(UpBlock2D(conv_filters, up_factor, data_format, layer_ind, pretraining, pretraining_type,
-                                           return_logits=layer_ind + 1 == len(net_params['up_conv_kernels'])))
-            self.last_depth = conv_filters[-1][1]
-            self.last_layer = conv_filters[-1]
-            
-#        self.Sigmoid = k.layers.Conv2D(1, 1, 1, use_bias=True, activation = 'sigmoid', data_format=self.data_format_keras, padding='same')
+            for i in [256, 128, 128, 64]:
+                self.AttentionBlock.append(AttnGatingBlock(data_format, i))
         
+        #create a list of downsampling blocks
+        if lstm == 'full':
+            for layer_ind, (conv_filters, lstm_filters) in enumerate(zip(net_params['up_conv_kernels'],
+                                                                         net_params['lstm_kernels'][::-1])):
+                up_factor = 2
+                self.UpLayers.append(UpBlock2D(conv_filters, lstm_filters, up_factor, data_format, layer_ind, pretraining,
+                                               return_logits=layer_ind + 1 == len(net_params['up_conv_kernels'])))
+                self.last_depth = conv_filters[-1][1]
+                self.last_layer = conv_filters[-1]
+        else:
+            for layer_ind, conv_filters in enumerate(net_params['up_conv_kernels']):
+                up_factor = 2
+                self.UpLayers.append(UpBlock2D(conv_filters, None, up_factor, data_format, layer_ind, pretraining,
+                                               return_logits=layer_ind + 1 == len(net_params['up_conv_kernels'])))
+                self.last_depth = conv_filters[-1][1]
+                self.last_layer = conv_filters[-1]    
 
     def call(self, inputs, training=None, mask=None):
         input_shape = inputs.shape
@@ -240,28 +270,26 @@ class ULSTMnet2D(k.Model):
         input_shape = inputs.shape
         skip_inputs = []
         out_down = inputs
+        #downsampling branch
         for down_layer in self.DownLayers:
             out_down, out_skip = down_layer(out_down, training=training, mask=mask)
             skip_inputs.append(out_skip)
         
+        #connecting layer with dropout
         up_input = tf.reshape(out_down, [input_shape[0]* input_shape[1], out_down.shape[2], out_down.shape[3], out_down.shape[4]])
         up_input = self.ConnectLayer(up_input)
-        up_input = self.Dropout(up_input, training)
-                
+        up_input = self.Dropout(up_input, training)               
         skip_inputs.reverse()
-#        first = True
+        #upsampling layer with and without attention gate
         assert len(skip_inputs) == len(self.UpLayers)
         if self.attention_gate:
             for up_layer, skip_input, signal_gate, attention_block in zip(self.UpLayers, skip_inputs, self.GateSignal, self.AttentionBlock):
                 up_input = signal_gate(up_input, is_batchnorm=True)
                 attn = attention_block(skip_input, up_input)
-                up_input = up_layer((up_input, attn), training=training, mask=mask)
+                up_input = up_layer((up_input, attn), training=training, mask=mask, shape = input_shape)
         else:
             for up_layer, skip_input in zip(self.UpLayers, skip_inputs):
-                up_input = up_layer((up_input, skip_input), training=training, mask=mask)
-#                if first:
-#                    up_input = self.Dropout(up_input, training)
-#                    first = False
+                up_input = up_layer((up_input, skip_input), training=training, mask=mask, shape = input_shape)
 
         logits_output_shape = up_input.shape
         logits_output = tf.reshape(up_input, [input_shape[0], input_shape[1], logits_output_shape[1],

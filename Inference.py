@@ -7,10 +7,11 @@ import tensorflow as tf
 import Params
 import argparse
 import DataHandeling
-import Networks as Nets
+import NewNet as Nets
 import sys
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 try:
@@ -58,11 +59,7 @@ METRICS_TEST = [
 
 
 def test():
-    loss_fn = LossFunction()
-    test_loss = k.metrics.Mean(name = 'test_loss')
-    test_metrics = METRICS_TEST
-    
-    model_folder = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2020-02-10_184135'
+    model_folder = '/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2020-03-03_191130'
     with open(os.path.join(model_folder, 'model_params.pickle'), 'rb') as fobj:
         model_dict = pickle.load(fobj)
     model_cls = get_model(model_dict['name'])
@@ -73,55 +70,52 @@ def test():
         model.load_weights(os.path.join(model_folder, 'model.ckpt'))
         log_print("Restored from {}".format(os.path.join(model_folder, 'model')))
         
-        
-    @tf.function
-    def test_step(image, label):
-        logits, output = model(image, False)
-        tt_loss = loss_fn.bce_dice_loss(label, output, logits)
-        test_loss(tt_loss)
-        if params.channel_axis == 1:
-            output = tf.transpose(output, (0, 1, 3, 4, 2))
-            label = tf.transpose(label, (0, 1, 3, 4, 2))
-        test_loss(tt_loss)
-        for i, metric in enumerate(test_metrics):
-            metric(label[:, -1], output[:, -1])
-            test_metrics[i] = metric
-        return output, tt_loss
+    image = cv2.imread('/home/stormlab/seg/LSTM-UNet-Outputs/Retrained/LSTMUNet/MyRun_SIM/2020-03-03_191130/image7.png', -1)
+    plt.imshow(image, cmap = 'gray')
+    img = cv2.resize(image, (64, 64), interpolation = cv2.INTER_AREA)
+    image = cv2.normalize(img.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+    np_image = np.expand_dims(image, axis=0)  # Add another dimension for tensorflow
+    np_image = np.expand_dims(np_image, axis=0)
+    np_image = np.expand_dims(np_image, axis=-1)
+
     
+    logits, pred = model(np_image, False)
+    pred = np.squeeze(pred, (0, 1, 4))
+    plt.imshow(pred, cmap = 'gray')
     
-    data_provider = params.data_provider
-    num_testing = data_provider.num_test()
-    data_provider.enqueue_index('test')
-    template = '{}: Step {}, Loss: {}, Accuracy: {}, Precision: {}, Recall: {}'
-    for i in range(0, num_testing):
-        image_seq, seg_seq = data_provider.read_new_image('test')
-        test_output_sequence, test_loss_value= test_step(image_seq, seg_seq)
-        log_print(template.format('Testing', int(i),
-                                  test_loss.result(),
-                                  test_metrics[4].result() * 100, test_metrics[5].result() * 100, 
-                                  test_metrics[6].result() * 100))
-#            display_image = image_seq[:, -1]
-#            display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
-#            display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
-#            test_imgs_dict['Image'] = display_image
-#            test_imgs_dict['GT'] = seg_seq[:, -1]
-#            test_imgs_dict['Output'] = test_output_sequence[:, -1]
-#            tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict, step_per_epoch/1)
-#            log_print('Printed Testing Step: {} to Tensorboard'.format(i))
-        for i in range(0, 7):
-            test_metrics[i].reset_states()
-        test_loss.reset_states()
-    for i in range(params.batch_size):
-        label_name = '/home/stormlab/seg/Output/Test_images/' + 'label' + str(i) + '.png'
-        image_name = '/home/stormlab/seg/Output/Test_images/' + 'image' + str(i) + '.png'
-        pred_name = '/home/stormlab/seg/Output/Test_images/' + 'pred' + str(i) + '.png'
-        pred = cv2.normalize(np.squeeze(np.array(test_output_sequence[i, -1])).astype(np.uint8), None, 0.0, 255, cv2.NORM_MINMAX)
-        image = cv2.normalize(np.squeeze(np.array(image_seq[i, -1])).astype(np.uint8), None, 0.0, 255, cv2.NORM_MINMAX)
-        label = cv2.normalize(np.squeeze(np.array(seg_seq[i, -1])).astype(np.uint8), None, 0.0, 255, cv2.NORM_MINMAX)
-        cv2.imwrite(filename=pred_name, img=np.squeeze(np.array(test_output_sequence[i, -1])).astype(np.uint8))
-        cv2.imwrite(filename=label_name, img=np.squeeze(np.array(seg_seq[i, -1])).astype(np.uint8))
-        cv2.imwrite(filename=image_name, img=np.squeeze(np.array(image_seq[i, -1])).astype(np.uint8))
-        print('Saved files', i)
+#    data_provider = params.data_provider
+#    num_testing = data_provider.num_test()
+#    data_provider.enqueue_index('test')
+#    template = '{}: Step {}, Loss: {}, Accuracy: {}, Precision: {}, Recall: {}'
+#    for i in range(0, num_testing):
+#        image_seq, seg_seq = data_provider.read_new_image('test')
+#        test_output_sequence, test_loss_value= test_step(image_seq, seg_seq)
+#        log_print(template.format('Testing', int(i),
+#                                  test_loss.result(),
+#                                  test_metrics[4].result() * 100, test_metrics[5].result() * 100, 
+#                                  test_metrics[6].result() * 100))
+##            display_image = image_seq[:, -1]
+##            display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
+##            display_image = display_image / tf.reduce_max(display_image, axis=(1, 2, 3), keepdims=True)
+##            test_imgs_dict['Image'] = display_image
+##            test_imgs_dict['GT'] = seg_seq[:, -1]
+##            test_imgs_dict['Output'] = test_output_sequence[:, -1]
+##            tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict, step_per_epoch/1)
+##            log_print('Printed Testing Step: {} to Tensorboard'.format(i))
+#        for i in range(0, 7):
+#            test_metrics[i].reset_states()
+#        test_loss.reset_states()
+#    for i in range(params.batch_size):
+#        label_name = '/home/stormlab/seg/Output/Test_images/' + 'label' + str(i) + '.png'
+#        image_name = '/home/stormlab/seg/Output/Test_images/' + 'image' + str(i) + '.png'
+#        pred_name = '/home/stormlab/seg/Output/Test_images/' + 'pred' + str(i) + '.png'
+#        pred = cv2.normalize(np.squeeze(np.array(test_output_sequence[i, -1])).astype(np.uint8), None, 0.0, 255, cv2.NORM_MINMAX)
+#        image = cv2.normalize(np.squeeze(np.array(image_seq[i, -1])).astype(np.uint8), None, 0.0, 255, cv2.NORM_MINMAX)
+#        label = cv2.normalize(np.squeeze(np.array(seg_seq[i, -1])).astype(np.uint8), None, 0.0, 255, cv2.NORM_MINMAX)
+#        cv2.imwrite(filename=pred_name, img=np.squeeze(np.array(test_output_sequence[i, -1])).astype(np.uint8))
+#        cv2.imwrite(filename=label_name, img=np.squeeze(np.array(seg_seq[i, -1])).astype(np.uint8))
+#        cv2.imwrite(filename=image_name, img=np.squeeze(np.array(image_seq[i, -1])).astype(np.uint8))
+#        print('Saved files', i)
                 
     
     

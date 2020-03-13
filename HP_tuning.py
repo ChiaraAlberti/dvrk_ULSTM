@@ -1,3 +1,5 @@
+#same concept of training.py but with hyperparamenter tuning 
+
 import argparse
 import os
 import pickle
@@ -10,13 +12,13 @@ import sys
 from utils import log_print
 import requests
 import cv2
-from tensorflow.python.keras import losses
 import time 
 import numpy as np
 import pandas as pd
 from netdict import Net_type
 import csv
 from tensorboard.plugins.hparams import api as hp
+
 
 try:
     # noinspection PyPackageRequirements
@@ -25,14 +27,35 @@ except AttributeError:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
     import tensorflow.keras as k
 
-METRICS = [
-      k.metrics.TruePositives(name='tp'),
-      k.metrics.FalsePositives(name='fp'),
-      k.metrics.TrueNegatives(name='tn'),
-      k.metrics.FalseNegatives(name='fn'), 
-      k.metrics.BinaryAccuracy(name='accuracy'),
-      k.metrics.Precision(name='precision'),
-      k.metrics.Recall(name='recall'),
+#defining metrics for training, validation and test
+METRICS_TRAIN = [
+      k.metrics.TruePositives(name='tp_train'),
+      k.metrics.FalsePositives(name='fp_train'),
+      k.metrics.TrueNegatives(name='tn_train'),
+      k.metrics.FalseNegatives(name='fn_train'), 
+      k.metrics.BinaryAccuracy(name='accuracy_train'),
+      k.metrics.Precision(name='precision_train'),
+      k.metrics.Recall(name='recall_train'),
+]
+
+METRICS_VAL = [
+      k.metrics.TruePositives(name='tp_val'),
+      k.metrics.FalsePositives(name='fp_val'),
+      k.metrics.TrueNegatives(name='tn_val'),
+      k.metrics.FalseNegatives(name='fn_val'), 
+      k.metrics.BinaryAccuracy(name='accuracy_val'),
+      k.metrics.Precision(name='precision_val'),
+      k.metrics.Recall(name='recall_val'),
+]
+
+METRICS_TEST = [
+      k.metrics.TruePositives(name='tp_test'),
+      k.metrics.FalsePositives(name='fp_test'),
+      k.metrics.TrueNegatives(name='tn_test'),
+      k.metrics.FalseNegatives(name='fn_test'), 
+      k.metrics.BinaryAccuracy(name='accuracy_test'),
+      k.metrics.Precision(name='precision_test'),
+      k.metrics.Recall(name='recall_test'),
 ]
 
 
@@ -41,12 +64,12 @@ print(f'Using Tensorflow version {tf.__version__}')
 if not tf.__version__.split('.')[0] == '2':
     raise ImportError(f'Required tensorflow version 2.x. current version is: {tf.__version__}')
 
-
 start_time = time.time()
 
 class AWSError(Exception):
     pass
 
+#loss function: dice_loss + binary cross entropy loss
 class LossFunction:
     def dice_coeff(self, y_true, y_pred):
         smooth = 1.
@@ -61,56 +84,129 @@ class LossFunction:
         loss = 1 - self.dice_coeff(y_true, y_pred)
         return loss
 
-    def bce_dice_loss(self, y_true, y_pred):
-        valid  = np.zeros((y_true.shape)).astype(np.float32)
-        valid[:, -1] = 1
-#        y_true = y_true * valid
-#        y_pred = y_pred * valid
+    def bce_dice_loss(self, y_true, y_pred, logits):
+        #select only the images which have the corresponding label
+        alpha = 0.6
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
-        bce_loss = losses.binary_crossentropy(y_true, y_pred)
+        logits = logits[:, -1]
+        bce_loss = tf.nn.weighted_cross_entropy_with_logits(y_true, logits, 0.8)
         dice_loss = self.dice_loss(y_true, y_pred)
-        loss = bce_loss + dice_loss
-#        y_true = y_true * valid
-#        y_pred = y_pred * valid
-#        loss = loss * valid
-#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(valid) + 0.00001)
-        return loss, dice_loss, bce_loss
+        loss = alpha*bce_loss + (1- alpha)*dice_loss
+        return loss
+
+#loss weighted cross entropy
+class WeightedLoss():
+    def loss(self, y_true, y_pred):
+        y_true = y_true[:, -1]
+        y_pred = y_pred[:, -1]
+        loss = tf.nn.weighted_cross_entropy_with_logits(y_true, y_pred, 0.8)
+#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
+        return loss
+
+
+class JaccardIndex() :   
+    def loss(self, y_true, y_pred):
+        y_true = y_true[:, -1]
+        y_pred = y_pred[:, -1]
+        y_true = tf.reshape(y_true, [-1])
+        y_pred = tf.reshape(y_pred, [-1])
+        y_pred = tf.cast(tf.math.greater(y_pred, 0.5), tf.float32)
+        intersection = tf.reduce_sum(tf.abs(y_true * y_pred), axis=-1)
+        sum_ = tf.reduce_sum(tf.abs(y_true) + tf.abs(y_pred), axis=-1)
+        jac = intersection/sum_
+        return jac
+
+class FocalTverskyLoss():
+    def loss(self, y_true, y_pred):
+#        beta = 4
+        y_true = y_true[:, -1]
+        y_pred = y_pred[:, -1]
+        y_true = tf.reshape(y_true, [-1])
+        y_pred = tf.reshape(y_pred, [-1])
+        mul = tf.reduce_sum(y_true*y_pred) 
+        rel_true = tf.reduce_sum(y_true*(1-y_pred))
+        rel_pred = tf.reduce_sum(y_pred *(1- y_true))
+#        num = (1+ math.pow(beta,2))*mul
+        den = mul + 0.7*rel_true + (1- 0.7)*rel_pred + 0.00001
+        loss = mul/den
+#        gamma = 0.75
+        return 1-loss #tf.math.pow((1-loss), gamma) 
+        
+
 
 
 def train(run_folder, hparams, params_value):
    
     device = '/gpu:0' if params.gpu_id >= 0 else '/cpu:0'
     with tf.device(device):
-        # Data input
+        #Initialization of the data
         data_provider = params.data_provider
+        #Initialization of the model and parameters
+        recurrent_dropout = hparams[HP_DROPOUT]
+        dropout = hparams[HP_DROPINPUT]
+        l1 = hparams[HP_L1]
+        l2 = hparams[HP_L2]
+        kernel_init = 'he_uniform'
+        net_type = 'original_net'
+        pretraining = False
+        pretraining_type = 'full'
+        step_per_epoch = data_provider.num_steps_per_epoch
+        step_val = data_provider.num_steps_per_val
+        num_epoch = 0
+        discriminator = False
+        attention_gate = False
+        
+        #Initialization neural network
+        net_kernel_params = Net_type(recurrent_dropout, (l1, l2), kernel_init)[net_type]
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, dropout, pretraining, pretraining_type, attention_gate)
 
-        # Model
-        net_kernel_params = Net_type(0, (0, 0), hparams[HP_KERNELINIT])['original_net']
-        # net_kernel_params = Net_type(dropout, (l1, l2), kern_init)['longLSTM_net']
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, False)
-        # Losses and Metrics
+        if discriminator:
+            disc = Nets.Discriminator(params.data_format)
+    
+        #Initialization of Losses and Metrics
         loss_fn = LossFunction()
+#        loss_fn = WeightedLoss()
         train_loss = k.metrics.Mean(name='train_loss')
-        train_metrics = METRICS
+        train_metrics = METRICS_TRAIN
         val_loss = k.metrics.Mean(name='val_loss')
-        val_metrics = METRICS
+        val_metrics = METRICS_VAL
         test_loss = k.metrics.Mean(name = 'test_loss')
-        test_metrics = METRICS
-        final_train_loss = 0
-        final_val_loss = 0
-        final_train_prec = 0
-        final_val_prec = 0
+        test_metrics = METRICS_TEST
+        final_test_loss = 0
+        final_test_prec = 0
+        final_test_acc = 0
+        final_test_rec = 0
 
-        # Save Checkpoints
 
-        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate = hparams[HP_LEARNINGRATE], 
-                decay_steps=100000,
-                decay_rate=hparams[HP_LEARNINGRATEDECAY], 
-                staircase=True)
-        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+        #define learning rate step decay
+        class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
+            def __init__(self):
+                print('Learning rate initialized')
+                
+            @tf.function   
+            def __call__(self, step):
+              if tf.less(step, 500):
+                return 0.0001
+              elif tf.logical_and(tf.greater(step, 500), tf.less(step, 2000)):
+                return 0.00005
+              elif tf.logical_and(tf.greater(step, 2000), tf.less(step, 5000)):
+                return 0.00001
+              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 10000)):
+                return 0.000005
+              elif tf.logical_and(tf.greater(step, 10000), tf.less(step, 20000)):
+                return 0.0000025
+              else:
+                return 0.000001
+            
+        #Adam optimizer
+        optimizer = tf.keras.optimizers.Adam(learning_rate=decay_lr())
+        if discriminator: 
+            optimizer_disc = tf.keras.optimizers.Adam(learning_rate=decay_lr())
+            
+        #Checkpoint
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
+        #Load checkpoint if there is
         if params.load_checkpoint:
             if os.path.isdir(params.load_checkpoint_path):
                 latest_checkpoint = tf.train.latest_checkpoint(params.load_checkpoint_path)
@@ -136,126 +232,166 @@ def train(run_folder, hparams, params_value):
 
         @tf.function
         def train_step(image, label): 
-            with tf.GradientTape() as tape:
-                predictions, softmax = model(image, True)
-#                model.summary()
-                loss, dice_loss, bce_loss = loss_fn.bce_dice_loss(label, softmax)
-            gradients = tape.gradient(loss, model.trainable_variables)
+            with tf.GradientTape() as gen_tape: #, tf.GradientTape() as disc_tape:
+                logits, output = model(image, True)
+                if discriminator:
+                    real = disc(label[:,-1])
+                    fake = disc(output[:, -1])
+                    d_loss = tf.reduce_mean(tf.math.log(real) + tf.math.log(1-fake))
+                    loss = loss_fn.bce_dice_loss(label, output, logits)
+#                    loss = loss_fn.loss(label, logits)
+                else: 
+                    loss = loss_fn.bce_dice_loss(label, output, logits)
+#                    loss = loss_fn.loss(label, logits)
+            gradients = gen_tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+            if discriminator: 
+                gradients_disc = disc_tape.gradient(d_loss, disc.trainable_variables)
+                optimizer_disc.apply_gradients(zip(gradients_disc, disc.trainable_variables))
             ckpt.step.assign_add(1)
             train_loss(loss)
             if params.channel_axis == 1:
-                predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
+                output = tf.transpose(output, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(train_metrics):
-                metric(label[:, -1], softmax[:, -1])
+                metric(label[:, -1], output[:,-1])
                 train_metrics[i] = metric
-            return softmax, predictions, loss
+            return output, loss
 
         @tf.function
         def val_step(image, label):
-            predictions, softmax = model(image, False)
-            t_loss, t_dice_loss, t_bce_loss = loss_fn.bce_dice_loss(label, softmax)
+            logits, output = model(image, False)
+            t_loss = loss_fn.bce_dice_loss(label, output, logits)
+#            t_loss = loss_fn.loss(label, logits)
             val_loss(t_loss)
             if params.channel_axis == 1:
-                predictions = tf.transpose(predictions, (0, 1, 3, 4, 2))
+                output = tf.transpose(output, (0, 1, 3, 4, 2))
                 label = tf.transpose(label, (0, 1, 3, 4, 2))
             for i, metric in enumerate(val_metrics):
-                metric(label[:, -1], softmax[:, -1])
+                metric(label[:, -1], output[:, -1])
                 val_metrics[i] = metric
-            return softmax, predictions, t_loss
+            return output, t_loss
         
         @tf.function
         def test_step(image, label):
-            predictions, softmax = model(image, False)
-            tt_loss, tt_dice_loss, tt_bce_loss = loss_fn.bce_dice_loss(label, softmax)
-#            val_loss(t_loss[:, -1])
+            logits, output = model(image, False)
+            tt_loss = loss_fn.bce_dice_loss(label, output, logits)
+#            tt_loss = loss_fn.loss(label, logits)
+            test_loss(tt_loss)
+            if params.channel_axis == 1:
+                output = tf.transpose(output, (0, 1, 3, 4, 2))
+                label = tf.transpose(label, (0, 1, 3, 4, 2))
             test_loss(tt_loss)
             for i, metric in enumerate(test_metrics):
-                metric(label[:, -1], softmax[:, -1])
+                metric(label[:, -1], output[:, -1])
                 test_metrics[i] = metric
-            return softmax, predictions, tt_loss
+            return output, tt_loss
 
         #inizialize directories and dictionaries to use on tensorboard
-        train_summary_writer = val_summary_writer = test_summary_writer = train_scalars_dict = val_scalars_dict = test_scalars_dict = None
-        if not params.dry_run:
-            
-            train_log_dir = os.path.join(params.experiment_log_dir, 'NN_'+ str(params_value[0]), 'train')
-            val_log_dir = os.path.join(params.experiment_log_dir,'NN_'+ str(params_value[0]), 'val')
-            test_log_dir = os.path.join(params.experiment_log_dir,'NN_'+ str(params_value[0]), 'test')
+        train_summary_writer = val_summary_writer = test_summary_writer  = None
+        train_scalars_dict = val_scalars_dict = test_scalars_dict = None
+        
+        if not params.dry_run: 
+            #Initialization of tensorboard's writers and dictionaries
+            train_log_dir = os.path.join(params.experiment_log_dir, 'NN_' + str(params_value[0]),  'train')
+            val_log_dir = os.path.join(params.experiment_log_dir, 'NN_' + str(params_value[0]), 'val')
+            test_log_dir = os.path.join(params.experiment_log_dir, 'NN_' + str(params_value[0]), 'test')
             train_summary_writer = tf.summary.create_file_writer(train_log_dir)
             val_summary_writer = tf.summary.create_file_writer(val_log_dir)
             test_summary_writer = tf.summary.create_file_writer(test_log_dir)
             
             train_scalars_dict = {'Loss': train_loss,'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
-            val_scalars_dict = {'Loss': val_loss, 'LUT values': train_metrics[0:4], 'Model evaluation': train_metrics[4:7]}
+            val_scalars_dict = {'Loss': val_loss, 'LUT values': val_metrics[0:4], 'Model evaluation': val_metrics[4:7]}
             test_scalars_dict = {'Loss': test_loss, 'LUT values': test_metrics[0:4], 'Model evaluation': test_metrics[4:7]}
-
-        def tboard(writer, log_dir, step, scalar_loss_dict, images_dict):
+#            
+        #write the values in tensorboard
+        def tboard(writer, log_dir, step, scalar_loss_dict, images_dict, factor):
             with tf.device('/cpu:0'):
                 with writer.as_default():
                     for scalar_loss_name, scalar_loss in scalar_loss_dict.items():
                         if (scalar_loss_name == 'LUT values'):
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'TruePositive')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result().numpy()/ckpt.step, step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result().numpy()/step_per_epoch*factor, step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'FalsePositive')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result().numpy()/ckpt.step, step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result().numpy()/step_per_epoch*factor, step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'TrueNegative')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result().numpy()/ckpt.step, step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result().numpy()/step_per_epoch*factor, step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'FalseNegative')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[3].result().numpy()/ckpt.step, step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[3].result().numpy()/step_per_epoch*factor, step=step)
                         elif (scalar_loss_name == 'Model evaluation'):
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'Accuracy')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result(), step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[0].result()*100, step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'Precision')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result(), step=step)
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[1].result()*100, step=step)
                             with tf.summary.create_file_writer(os.path.join(log_dir, 'Recall')).as_default():
-                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result(), step=step)                   
+                               tf.summary.scalar(scalar_loss_name, scalar_loss[2].result()*100, step=step)                   
                         else:
                             tf.summary.scalar(scalar_loss_name, scalar_loss.result(), step=step)
                     for image_name, image in images_dict.items():
                         if params.channel_axis == 1:
                             image = tf.transpose(image, (0, 2, 3, 1))
                         tf.summary.image(image_name, image, max_outputs=1, step=step)
-                        
+        
+        #binarization of the output and perform some morphological operations                
         def post_processing(images):
             images_shape = images.shape
             im_reshaped = np.reshape(images, (images.shape[0], images.shape[1], images.shape[2]))
             bw_predictions = np.zeros((images.shape[0], images.shape[1], images.shape[2])).astype(np.float32)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
             for i in range(0, images.shape[0]):
                 ret, bw_predictions[i] = cv2.threshold(im_reshaped[i],0.8, 1 ,cv2.THRESH_BINARY)
+                bw_predictions[i] = cv2.morphologyEx(bw_predictions[i], cv2.MORPH_OPEN, kernel)
+                bw_predictions[i] = cv2.morphologyEx(bw_predictions[i], cv2.MORPH_CLOSE, kernel)
             bw_predictions = np.reshape(bw_predictions, images_shape)
             return bw_predictions
+
             
         template = '{}: Step {}, Loss: {}, Accuracy: {}, Precision: {}, Recall: {}'
         try:
             # if True:
-            val_states = model.get_states()
             train_imgs_dict = {}
             val_imgs_dict = {}
             test_imgs_dict = {}
+            
+            log_print('Starting of epoch: {}'.format(int(num_epoch)))
+            progbar = tf.keras.utils.Progbar(step_per_epoch)
+
+            #iterate along the number of iterations
             for _ in range(int(ckpt.step), params.num_iterations + 1):
+                
                 if params.aws:
                     r = requests.get('http://169.254.169.254/latest/meta-data/spot/instance-action')
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
-                image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train', False, None, None)
+                #read batch
+                image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train', False, None)
+                #train batch
+                train_output_sequence, train_loss_value= train_step(image_sequence, seg_sequence)
+                #postprocessing prediction
+                train_bw_predictions = post_processing(train_output_sequence[:, -1])
                 
-                if params.profile:
-                        tf.summary.trace_on(graph=True, profiler=True)
+                progbar.update(int(ckpt.step)- num_epoch*step_per_epoch)
                 
-                train_output_sequence, train_predictions, train_loss_value= train_step(image_sequence, seg_sequence)    
-                bw_predictions = post_processing(train_output_sequence[:, -1])
+                #if epoch is finished
+                if not int(ckpt.step) % step_per_epoch:                   
+                    #validation steps are performed
+                    for i in range(0, step_val):
+                        (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None)                      
+                        #if profile is true, write on tensorboard the network graph
+                        
+                        val_output_sequence, val_loss_value= val_step(val_image_sequence,
+                                                                      val_seg_sequence)
 
-                if params.profile:
-                    with train_summary_writer.as_default():
-                        tf.summary.trace_export('train_step', step=int(ckpt.step),
-                                                profiler_outdir=params.experiment_log_dir)
-                model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
+                        val_bw_predictions = post_processing(val_output_sequence[:, -1])
 
-                #calling the function that writes the dictionaries on tensorboard
-                if not int(ckpt.step) % params.write_to_tb_interval:
+                    #print training values to console 
+                    log_print(template.format('Training', int(ckpt.step),
+                          train_loss.result(),
+                          train_metrics[4].result() * 100, train_metrics[5].result() * 100, 
+                          train_metrics[6].result() * 100))
+
+                     #calling the function that writes the training dictionaries on tensorboard
                     if not params.dry_run:
                         display_image = image_sequence[:, -1]
                         display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
@@ -263,33 +399,25 @@ def train(run_folder, hparams, params_value):
                         train_imgs_dict['Image'] = display_image
                         train_imgs_dict['GT'] = seg_sequence[:, -1]
                         train_imgs_dict['Output'] = train_output_sequence[:, -1]
-                        train_imgs_dict['Output_bw'] = bw_predictions
-                        tboard(train_summary_writer, train_log_dir, int(ckpt.step), train_scalars_dict, train_imgs_dict)
+                        train_imgs_dict['Output_bw'] = train_bw_predictions
+                        tboard(train_summary_writer, train_log_dir, int(ckpt.step), train_scalars_dict, train_imgs_dict, 1)
+                        
                         log_print('Printed Training Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
                         log_print("WARNING: dry_run flag is ON! Not saving checkpoints or tensorboard data")
-
-                if int(ckpt.step) % params.save_checkpoint_iteration == 0 or int(ckpt.step) == params.num_iterations:
-                    if not params.dry_run:
-                        save_path = manager.save(int(ckpt.step))
-                        log_print("Saved checkpoint for step {}: {}".format(int(ckpt.step), save_path))
-                    else:
-                        log_print("WARNING: dry_run flag is ON! Mot saving checkpoints or tensorboard data")
-                if not int(ckpt.step) % params.print_to_console_interval:
-                    log_print(template.format('Training', int(ckpt.step),
-                                              train_loss.result(),
-                                              train_metrics[4].result() * 100, train_metrics[5].result() * 100, 
-                                              train_metrics[6].result() * 100))
-
-                if not int(ckpt.step) % params.validation_interval:
-                    train_states = model.get_states()
-                    model.set_states(val_states)
-                    (val_image_sequence, val_seg_sequence, val_is_last_batch) = data_provider.read_batch('val', False, None, None)
-                    val_output_sequence, val_predictions, val_loss_value = val_step(val_image_sequence,
-                                                                                    val_seg_sequence)
-                    bw_predictions = post_processing(val_output_sequence[:, -1])
-                    model.reset_states_per_batch(val_is_last_batch)  # reset states for sequences that ended
-                    #calling the function that writes the dictionaries on tensorboard
+                        
+                    #reset train metrics
+                    for i in range(0, 7):
+                        train_metrics[i].reset_states()
+                    train_loss.reset_states()
+            
+                    #print validation values to console
+                    log_print(template.format('Validation', int(ckpt.step),
+                                              val_loss.result(),
+                                              val_metrics[4].result() * 100, val_metrics[5].result() * 100, 
+                                              val_metrics[6].result() * 100))
+            
+                    #calling the function that writes the validation dictionaries on tensorboard
                     if not params.dry_run:
                         display_image = val_image_sequence[:, -1]
                         display_image = display_image - tf.reduce_min(display_image, axis=(1, 2, 3), keepdims=True)
@@ -297,35 +425,40 @@ def train(run_folder, hparams, params_value):
                         val_imgs_dict['Image'] = display_image
                         val_imgs_dict['GT'] = val_seg_sequence[:, -1]
                         val_imgs_dict['Output'] = val_output_sequence[:, -1]
-                        val_imgs_dict['Output_bw'] = bw_predictions
-                        tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict)
+                        val_imgs_dict['Output_bw'] = val_bw_predictions
+                        tboard(val_summary_writer, val_log_dir, int(ckpt.step), val_scalars_dict, val_imgs_dict, step_per_epoch/step_val)
+                    
                         log_print('Printed Validation Step: {} to Tensorboard'.format(int(ckpt.step)))
                     else:
                         log_print("WARNING: dry_run flag is ON! Not saving checkpoints or tensorboard data")
+                    
+                    #reset validation metrics                     
+                    for i in range(0, 7):
+                        val_metrics[i].reset_states()
+                    val_loss.reset_states()
+                    
+                    num_epoch = num_epoch +1
+                    log_print('Starting of epoch: {}'.format(int(num_epoch)))
+                    
+                    progbar = tf.keras.utils.Progbar(step_per_epoch)
+                
+                #save checkpoints
+                if int(ckpt.step) % params.save_checkpoint_iteration == 0 or int(ckpt.step) == params.num_iterations:
+                    if not params.dry_run:
+                        save_path = manager.save(int(ckpt.step))
+                        log_print("Saved checkpoint for step {}: {}".format(int(ckpt.step), save_path))
+                    else:
+                        log_print("WARNING: dry_run flag is ON! Mot saving checkpoints or tensorboard data")  
 
-                    log_print(template.format('Validation', int(ckpt.step),
-                                              val_loss.result(),
-                                              val_metrics[4].result() * 100, val_metrics[5].result() * 100, 
-                                              val_metrics[6].result() * 100))
-                    val_states = model.get_states()
-                    model.set_states(train_states)
+                #when it comes to the end 
                 if ckpt.step == params.num_iterations:
-                    final_train_loss = train_loss.result().numpy()
-                    final_val_loss = val_loss.result().numpy()
-                    final_train_prec = train_metrics[5].result().numpy() * 100
-                    final_val_prec = train_metrics[5].result().numpy() * 100
-                    with tf.summary.create_file_writer(run_folder).as_default():
-                        hp.hparams(hparams)  # record the values used in this trial
-                        precision = train_metrics[5].result()
-                        tf.summary.scalar(METRIC_ACCURACY, precision, step=ckpt.step)
-                    num_test = data_provider.num_test()
-                    data_provider.enqueue_index()
-#                    model_test = Nets.ULSTMnet2D(net_kernel_params, params.data_format, True, False)
-#                    model_test.set_weights(model.get_weights()) 
-                    for i in range(0, num_test):
-                        image_seq, seg_seq = data_provider.read_new_image()
-                        test_output_sequence, test_predictions, test_loss_value= test_step(image_seq, seg_seq)
-                        bw_predictions = post_processing(test_output_sequence[:, -1])
+                    #create the dataset
+                    num_testing = data_provider.num_test()
+                    data_provider.enqueue_index('test', None)
+                    #perform test on the new samples
+                    for i in range(0, num_testing):
+                        image_seq, seg_seq = data_provider.read_new_image('test')
+                        test_output_sequence, test_loss_value= test_step(image_seq, seg_seq)
                         log_print(template.format('Testing', int(i),
                                                   test_loss.result(),
                                                   test_metrics[4].result() * 100, test_metrics[5].result() * 100, 
@@ -336,9 +469,27 @@ def train(run_folder, hparams, params_value):
                         test_imgs_dict['Image'] = display_image
                         test_imgs_dict['GT'] = seg_seq[:, -1]
                         test_imgs_dict['Output'] = test_output_sequence[:, -1]
-                        test_imgs_dict['Output_bw'] = bw_predictions
-                        tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict)
+                        tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict, step_per_epoch/1)
                         log_print('Printed Testing Step: {} to Tensorboard'.format(i))
+                    #save final test values
+                    final_test_loss = test_loss.result()
+                    final_test_acc = test_metrics[4].result() * 100
+                    final_test_prec = test_metrics[5].result() * 100
+                    final_test_rec = test_metrics[6].result() * 100
+                    
+                    #save the values on tensorboard 
+                    with tf.summary.create_file_writer(run_folder).as_default():
+                        # record the hyperparameters values used in this trial
+                        hp.hparams(hparams)  
+                        precision = test_metrics[5].result()*100
+                        loss = test_loss.result()
+                        recall = val_metrics[6].result()
+                        accuracy = test_metrics[4].result()
+                        tf.summary.scalar(METRIC_PRECISION, precision, step=ckpt.step)
+                        tf.summary.scalar(METRIC_LOSS, loss, step=ckpt.step)
+                        tf.summary.scalar(METRIC_RECALL, recall, step=ckpt.step)
+                        tf.summary.scalar(METRIC_ACCURACY, accuracy, step=ckpt.step)
+
 
         except (KeyboardInterrupt, ValueError, AWSError) as err:
             if not params.dry_run:
@@ -352,20 +503,22 @@ def train(run_folder, hparams, params_value):
             raise err
         finally:
             if not params.dry_run:
+                #save model's weights
                 log_print('Saving Model of inference:')
                 model_fname = os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model.ckpt'.format(int(ckpt.step)))
                 model.save_weights(model_fname, save_format='tf')
                 with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'model_params.pickle'), 'wb') as fobj:
                     pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
                                 fobj, protocol=pickle.HIGHEST_PROTOCOL)
+                #save hyperparameters values and test results
                 with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv'), 'w') as fobj:
                     writer = csv.writer(fobj)
                     model_dict = {'Model': []}
                     model_dict.update(model_dict.fromkeys(dict_param.keys(),[]))
                     for i, key in enumerate(model_dict.items()):
                         model_dict[key[0]] = params_value[i]
-                    model_dict.update({'Train_loss': final_train_loss, 'Train_precision': final_train_prec,
-                                      'Val_loss': final_val_loss, 'Val_precision': final_val_prec})
+                    model_dict.update({'Loss': np.array(final_test_loss), 'Accuracy': np.array(final_test_acc), 
+                                  'Precision': np.array(final_test_prec), 'Recall': np.array(final_test_rec)})
                     for key, value in model_dict.items():
                        writer.writerow([key, value])
                 log_print('Saved Model to file: {}'.format(model_fname))
@@ -490,66 +643,68 @@ if __name__ == '__main__':
     input_args = arg_parser.parse_args()
     args_dict = {key: val for key, val in vars(input_args).items() if not (val is None)}
     print(args_dict)
-    # params = Params.CTCParamsNoLSTM(args_dict)
 
-    # try:
-    #     train()
-    # finally:
-    #     log_print('Done')
     
-
-    df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list.csv')
+    #download the file with the parameters and their values
+    df = pd.read_csv(r'/home/stormlab/seg/LSTM-UNet-master/params_list_reg.csv')
     df.fillna(4,inplace=True)
     dict_param = df.to_dict(orient='list')
     dict_param = {k:[elem for elem in v if elem !=4] for k,v in dict_param.items()}
     complete_dict = []
-    params_value = [None]*4
+    params_value = [None]*5
     model_number = 0
     
-#    HP_DROPOUT = hp.HParam('dropout', hp.Discrete(dict_param['Dropout']))
-#    HP_DROPINPUT = hp.HParam('drop input', hp.Discrete(dict_param['Drop_input']))
-    HP_LEARNINGRATE = hp.HParam('lr', hp.Discrete(dict_param['Learning rate']))
-    HP_LEARNINGRATEDECAY = hp.HParam('lr_decay', hp.Discrete(dict_param['Learning rate decay']))
-#    HP_L1 = hp.HParam('l1', hp.Discrete(dict_param['L1']))
-#    HP_L2 = hp.HParam('l2', hp.Discrete(dict_param['L2']))
-#    HP_TYPENN = hp.HParam('NN_type', hp.Discrete(dict_param['Type of NN']))
-    HP_KERNELINIT = hp.HParam('Kern_init', hp.Discrete(dict_param['Kernel init']))
-    METRIC_ACCURACY = 'precision'
+    #define the hyperparameters and the metrics
+    HP_DROPOUT = hp.HParam('dropout', hp.Discrete(dict_param['Dropout']))
+    HP_DROPINPUT = hp.HParam('drop input', hp.Discrete(dict_param['Drop_input']))
+    HP_L1 = hp.HParam('l1', hp.Discrete(dict_param['L1']))
+    HP_L2 = hp.HParam('l2', hp.Discrete(dict_param['L2']))
+    METRIC_PRECISION = 'precision'
+    METRIC_LOSS = 'loss'
+    METRIC_RECALL = 'RECALL'
+    METRIC_ACCURACY = 'ACCURACY'
+
 
   
-
-    for lr in HP_LEARNINGRATE.domain.values:
-        params_value[1] = lr
-        for lr_decay in HP_LEARNINGRATEDECAY.domain.values:
-            params_value[2] = lr_decay
-            for kern_init in HP_KERNELINIT.domain.values:
-                params_value[3] = kern_init
-                params_value[0] = model_number
-                params = Params.CTCParams(args_dict)
-                with tf.summary.create_file_writer(os.path.join(params.experiment_log_dir, 'hparam_tuning')).as_default():
-                    hp.hparams_config(
-                      hparams=[HP_LEARNINGRATE, HP_LEARNINGRATEDECAY, HP_KERNELINIT],
-                      metrics=[hp.Metric(METRIC_ACCURACY, display_name='precision')],
-                    )
-                hparams = {
-                    HP_LEARNINGRATE: lr,
-                    HP_LEARNINGRATEDECAY: lr_decay,
-                    HP_KERNELINIT: kern_init,
-                }
-                run_name = "run-%d" % model_number
-                print('--- Starting trial: %s' % run_name)
-                print({h.name: hparams[h] for h in hparams})
-                params = Params.CTCParams(args_dict)
-                train(os.path.join(params.experiment_log_dir, 'hparam_tuning/') + run_name, hparams, params_value)
-                model_number += 1
-                
-                with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
-                    reader = csv.reader(csv_file)
-                    model_dict = dict(reader)
-                    complete_dict.append(model_dict)
-                with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
-                    writer = csv.DictWriter(f, complete_dict[0].keys())
-                    writer.writeheader()
-                    writer.writerows(complete_dict)
+#cycle on the parameters values , create the tensorboard writer file and call the train method
+    for dropout in HP_DROPOUT.domain.values:
+        params_value[1] = dropout
+        for drop_input in HP_DROPINPUT.domain.values:
+            params_value[2] = drop_input
+            for l1 in HP_L1.domain.values:
+                params_value[3] = l1
+                for l2 in HP_L2.domain.values:
+                    params_value[4] = l2
+                    params_value[0] = model_number
+                    params = Params.CTCParams(args_dict)
+                    with tf.summary.create_file_writer(os.path.join(params.experiment_log_dir, 'hparam_tuning')).as_default():
+                        hp.hparams_config(
+                          hparams=[HP_DROPOUT, HP_DROPINPUT, HP_L1, HP_L2],
+                          metrics=[hp.Metric(METRIC_PRECISION, display_name='precision'), 
+                                   hp.Metric(METRIC_LOSS, display_name='loss'), 
+                                   hp.Metric(METRIC_RECALL, display_name='recall'),
+                                   hp.Metric(METRIC_ACCURACY, display_name='accuracy')]
+                          )
+                    hparams = {
+                        HP_DROPOUT: dropout,
+                        HP_DROPINPUT: drop_input,
+                        HP_L1: l1,
+                        HP_L2: l2,
+                    }
+                    run_name = "run-%d" % model_number
+                    print('--- Starting trial: %s' % run_name)
+                    print({h.name: hparams[h] for h in hparams})
+                    train(os.path.join(params.experiment_log_dir, 'hparam_tuning/') + run_name, hparams, params_value)
+                    model_number += 1
+                    
+                    
+                    with open(os.path.join(params.experiment_save_dir, 'NN_'+ str(params_value[0]), 'params_list.csv')) as csv_file:
+                        reader = csv.reader(csv_file)
+                        model_dict = dict(reader)
+                        complete_dict.append(model_dict)
+                    with open(os.path.join(params.experiment_save_dir, 'model_param_list.csv'), 'w') as f: 
+                        writer = csv.DictWriter(f, complete_dict[0].keys())
+                        writer.writeheader()
+                        writer.writerows(complete_dict)
 
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-#training, validation and testing code
 import argparse
 import os
 import pickle
@@ -14,11 +13,9 @@ import sys
 from utils import log_print
 import requests
 import cv2
-from tensorflow.python.keras import losses
 import time 
 import numpy as np
 from netdict import Net_type
-#from netdict import TrainableLayers
 import csv 
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -33,6 +30,7 @@ except AttributeError:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
     import tensorflow.keras as k
 
+#defining metrics for training, validation and test
 METRICS_TRAIN = [
       k.metrics.TruePositives(name='tp_train'),
       k.metrics.FalsePositives(name='fp_train'),
@@ -85,7 +83,6 @@ class AWSError(Exception):
     pass
 
 #loss function: dice_loss + binary cross entropy loss
-#loss function: dice_loss + binary cross entropy loss
 class LossFunction:
     def dice_coeff(self, y_true, y_pred):
         smooth = 1.
@@ -111,6 +108,7 @@ class LossFunction:
         loss = alpha*bce_loss + (1- alpha)*dice_loss
         return loss
 
+#loss weighted cross entropy
 class WeightedLoss():
     def loss(self, y_true, y_pred):
         y_true = y_true[:, -1]
@@ -120,32 +118,30 @@ class WeightedLoss():
         return loss
 
 
-class JaccardLoss() :   
+class JaccardIndex() :   
     def loss(self, y_true, y_pred):
-        y_true = y_true[:, -1]
-        y_pred = y_pred[:, -1]
-        y_pred = tf.cast(tf.math.greater(y_pred, 0.5), tf.float32)
-        intersection = tf.reduce_sum(tf.abs(y_true * y_pred), axis=-1)
-        sum_ = tf.reduce_sum(tf.abs(y_true) + tf.abs(y_pred), axis=-1)
-        jac = intersection/sum_
-#        loss = tf.reduce_sum(loss) / (tf.reduce_sum(np.ones(y_true.shape).astype(np.float32)) + 0.00001)
-        return jac
-
-class FocalTverskyLoss():
-    def loss(self, y_true, y_pred):
-#        beta = 4
         y_true = y_true[:, -1]
         y_pred = y_pred[:, -1]
         y_true = tf.reshape(y_true, [-1])
         y_pred = tf.reshape(y_pred, [-1])
-        mul = tf.reduce_sum(y_true*y_pred) 
-        rel_true = tf.reduce_sum(y_true*(1-y_pred))
-        rel_pred = tf.reduce_sum(y_pred *(1- y_true))
-#        num = (1+ math.pow(beta,2))*mul
-        den = mul + 0.7*rel_true + (1- 0.7)*rel_pred + 0.00001
+        y_pred = tf.cast(tf.math.greater(y_pred, 0.5), tf.float32)
+        intersection = tf.reduce_sum(tf.abs(y_true * y_pred), axis=-1)
+        sum_ = tf.reduce_sum(tf.abs(y_true) + tf.abs(y_pred), axis=-1)
+        jac = intersection/sum_
+        return jac
+
+class TverskyLoss():
+    def loss(self, y_true, y_pred):
+        y_true = y_true[:, -1]
+        y_pred = y_pred[:, -1]
+        y_true = tf.reshape(y_true, [-1])
+        y_pred = tf.reshape(y_pred, [-1])
+        mul = tf.reduce_sum(tf.abs(y_true*y_pred)) 
+        rel_true = tf.reduce_sum(tf.abs(y_true*(1-y_pred)))
+        rel_pred = tf.reduce_sum(tf.abs(y_pred *(1 - y_true)))
+        den = mul + 0.7*rel_true + (1 - 0.7)*rel_pred + 0.00001
         loss = mul/den
-#        gamma = 0.75
-        return 1-loss #tf.math.pow((1-loss), gamma) 
+        return 1-loss 
         
 
 
@@ -155,7 +151,7 @@ def train():
     with tf.device(device):
         #Initialization of the data
         data_provider = params.data_provider
-        #Initialization of the model 
+        #Initialization of the model and parameters
         recurrent_dropout = 0.3
         dropout = 0.3
         l1 = 0
@@ -163,30 +159,25 @@ def train():
         kernel_init = 'he_uniform'
         net_type = 'original_net'
         pretraining = False
-        if not pretraining:
-            lrate = 0.0001
-            lr_decay = 0.1
-        else:
-            lrate  = 0.0001
-            lr_decay = 0.005
-        pretraining_type = 'full'
+        lstm_type = 'enc'
         step_per_epoch = data_provider.num_steps_per_epoch
         step_val = data_provider.num_steps_per_val
         step_gif = step_per_epoch*10
         num_epoch = 0
         patience = 1000
         discriminator = False
-        attention_gate = False
+        attention_gate = True
         
+        #Initialization neural network
         net_kernel_params = Net_type(recurrent_dropout, (l1, l2), kernel_init)[net_type]
-        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, dropout, pretraining, pretraining_type, attention_gate)
-#        if pretraining != False: 
-#            model = TrainableLayers(model, pretraining_type)
+        model = Nets.ULSTMnet2D(net_kernel_params, params.data_format, False, dropout, pretraining, lstm_type, attention_gate)
+
         if discriminator:
             disc = Nets.Discriminator(params.data_format)
+    
         #Initialization of Losses and Metrics
         loss_fn = LossFunction()
-#        loss_fn = WeightedLoss()
+#        loss_fn = TverskyLoss()
         train_loss = k.metrics.Mean(name='train_loss')
         train_metrics = METRICS_TRAIN
         val_loss = k.metrics.Mean(name='val_loss')
@@ -195,19 +186,13 @@ def train():
         test_metrics = METRICS_TEST
         best_test_loss = k.metrics.Mean(name = 'best_test_loss')
         best_test_metrics = METRICS_BEST_TEST
-        final_train_loss = 0
-        final_val_loss = 0
-        final_train_prec = 0
-        final_val_prec = 0
+        final_test_loss = 0
+        final_test_prec = 0
+        final_test_acc = 0
+        final_test_rec = 0
 
-        #Exponential learning rate decay
-#        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-#                initial_learning_rate = lrate, 
-#                decay_steps=10000,
-#                decay_rate=lr_decay, 
-#                staircase=True)
-               
-        
+
+        #define learning rate step decay
         class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
             def __init__(self):
                 print('Learning rate initialized')
@@ -220,27 +205,12 @@ def train():
                 return 0.00005
               elif tf.logical_and(tf.greater(step, 2000), tf.less(step, 5000)):
                 return 0.00001
-              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 10000)):
+              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 8000)):
                 return 0.000005
-              elif tf.logical_and(tf.greater(step, 10000), tf.less(step, 20000)):
-                return 0.0000025
               else:
                 return 0.000001
-            
-#        class decay_lr(tf.keras.optimizers.schedules.LearningRateSchedule):
-#            def __init__(self):
-#                print('Learning rate initialized')
-#                
-#            @tf.function   
-#            def __call__(self, step):
-#              if tf.less(step, 5000):
-#                return 0.0001
-#              elif tf.logical_and(tf.greater(step, 5000), tf.less(step, 8000)):
-#                return 0.00005
-#              else:
-#                return 0.00001
-        
-        
+
+        #Early stopping control
         class EarlyStoppingAtMinLoss(tf.keras.callbacks.Callback):
     
             def __init__(self, patience=0):
@@ -265,8 +235,6 @@ def train():
                 else:
                     self.wait += 1
                     if self.wait >= self.patience:
-#                        print('Restoring model weights from the end of the best epoch.')
-#                        model.set_weights(self.best_weights)
                         self.stop = True
                 return self.stop, self.best_weights
         
@@ -279,13 +247,10 @@ def train():
         optimizer = tf.keras.optimizers.Adam(learning_rate=decay_lr())
         if discriminator: 
             optimizer_disc = tf.keras.optimizers.Adam(learning_rate=decay_lr())
-#        optimizer = tf.compat.v2.keras.optimizers.Adam(lr=lrate)
         
         #Checkpoint 
         ckpt = tf.train.Checkpoint(step=tf.Variable(0, dtype=tf.int64), optimizer=optimizer, net=model)
         
-
-
         #Early Stopping callback
         early_stopping = EarlyStoppingAtMinLoss(patience)
         
@@ -326,7 +291,7 @@ def train():
 #                    loss = loss_fn.loss(label, logits)
                 else: 
                     loss = loss_fn.bce_dice_loss(label, output, logits)
-#                    loss = loss_fn.loss(label, logits)
+#                    loss = loss_fn.loss(label, output)
             gradients = gen_tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             if discriminator: 
@@ -346,7 +311,7 @@ def train():
         def val_step(image, label):
             logits, output = model(image, False)
             t_loss = loss_fn.bce_dice_loss(label, output, logits)
-#            t_loss = loss_fn.loss(label, logits)
+#            t_loss = loss_fn.loss(label, output)
             val_loss(t_loss)
             if params.channel_axis == 1:
                 output = tf.transpose(output, (0, 1, 3, 4, 2))
@@ -360,7 +325,7 @@ def train():
         def test_step(image, label):
             logits, output = model(image, False)
             tt_loss = loss_fn.bce_dice_loss(label, output, logits)
-#            tt_loss = loss_fn.loss(label, logits)
+#            tt_loss = loss_fn.loss(label, output)
             test_loss(tt_loss)
             if params.channel_axis == 1:
                 output = tf.transpose(output, (0, 1, 3, 4, 2))
@@ -375,7 +340,7 @@ def train():
         def best_test_step(image, label):
             logits, output = model(image, False)
             tt_loss = loss_fn.bce_dice_loss(label, output, logits)
-#            tt_loss = loss_fn.loss(label, logits)
+#            tt_loss = loss_fn.loss(label, output)
             test_loss(tt_loss)
             if params.channel_axis == 1:
                 output = tf.transpose(output, (0, 1, 3, 4, 2))
@@ -439,7 +404,7 @@ def train():
                             image = tf.transpose(image, (0, 2, 3, 1))
                         tf.summary.image(image_name, image, max_outputs=1, step=step)
         
-        #binarization of the output                  
+        #binarization of the output and perform some morphological operations                
         def post_processing(images):
             images_shape = images.shape
             im_reshaped = np.reshape(images, (images.shape[0], images.shape[1], images.shape[2]))
@@ -452,7 +417,7 @@ def train():
             bw_predictions = np.reshape(bw_predictions, images_shape)
             return bw_predictions
         
-        #visualize images and labels of a batch (can be also used to visualize predictions and labels )
+        #visualize images and labels of a batch (can be also used to visualize predictions and labels)
         def show_dataset_labels(x_train, y_train):
             num_train = x_train.shape[0]*x_train.shape[1]
             x_train = np.reshape(x_train, (x_train.shape[0]*x_train.shape[1], x_train.shape[2], x_train.shape[3]))
@@ -481,6 +446,7 @@ def train():
             minimum_found = False
             stopped_epoch = None
             stop = False
+            #initialization for gif 
             output_batch_list = {}
             for i in range(0, params.batch_size):
                 output_batch_list[str(i)] = []
@@ -497,43 +463,18 @@ def train():
                     if not r.status_code == 404:
                         raise AWSError('Quitting Spot Instance Gracefully')
 
+                #read batch
                 image_sequence, seg_sequence, is_last_batch = data_provider.read_batch('train', False, None)
-#                show_dataset_labels(image_sequence, seg_sequence)
-                train_output_sequence, train_loss_value= train_step(image_sequence, seg_sequence)    
+                #train batch
+                train_output_sequence, train_loss_value= train_step(image_sequence, seg_sequence)
+                #postprocessing prediction
                 train_bw_predictions = post_processing(train_output_sequence[:, -1])
                 
                 progbar.update(int(ckpt.step)- num_epoch*step_per_epoch)
                 
-                #model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended
-
-#                if not int(ckpt.step) % params.validation_interval:
-#                    #validation
-#                    (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None, None)
-#                        
-#                    #if profile is true, write on tensorboard the network graph
-#                    if params.profile:
-#                        graph_dir = os.path.join(params.experiment_log_dir, 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
-#                        tf.summary.trace_on(graph=True, profiler=True)
-#                        graph_summary_writer = tf.summary.create_file_writer(graph_dir)
-#                    
-#                    val_output_sequence, val_loss_value= val_step(val_image_sequence,
-#                                                                   val_seg_sequence)
-#                    
-#                    if not minimum_found:
-#                        stop, best_weights = early_stopping.step_end(num_epoch, val_loss)
-#                    
-#                    if params.profile:
-#                        with graph_summary_writer.as_default():
-#                            tf.summary.trace_export('train_step', step=int(ckpt.step),
-#                                                    profiler_outdir=params.experiment_log_dir)
-#                    
-#                    val_bw_predictions = post_processing(val_output_sequence[:, -1])
-#                    #model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended   
-              
-               
-                if not int(ckpt.step) % step_per_epoch:
-                    
-                    #validation
+                #if epoch is finished
+                if not int(ckpt.step) % step_per_epoch:                   
+                    #validation steps are performed
                     for i in range(0, step_val):
                         (val_image_sequence, val_seg_sequence, is_last_batch) = data_provider.read_batch('val', False, None)                      
                         #if profile is true, write on tensorboard the network graph
@@ -541,7 +482,7 @@ def train():
                             graph_dir = os.path.join(params.experiment_log_dir, 'graph/') + datetime.now().strftime("%Y%m%d-%H%M%S")
                             tf.summary.trace_on(graph=True, profiler=True)
                             graph_summary_writer = tf.summary.create_file_writer(graph_dir)
-                    
+                        
                         val_output_sequence, val_loss_value= val_step(val_image_sequence,
                                                                       val_seg_sequence)
                         if params.profile:
@@ -550,12 +491,11 @@ def train():
                                                         profiler_outdir=params.experiment_log_dir)
                         val_bw_predictions = post_processing(val_output_sequence[:, -1])
                     
+                    #if the best loss is not found, call early stopping callback
                     if not minimum_found:
                         stop, best_weights = early_stopping.step_end(num_epoch, val_loss)
 
-                    #model.reset_states_per_batch(is_last_batch)  # reset states for sequences that ended                      
-                    
-                    
+
                     #print training values to console 
                     log_print(template.format('Training', int(ckpt.step),
                           train_loss.result(),
@@ -577,7 +517,7 @@ def train():
                     else:
                         log_print("WARNING: dry_run flag is ON! Not saving checkpoints or tensorboard data")
                         
-                    #reset metrics
+                    #reset train metrics
                     for i in range(0, 7):
                         train_metrics[i].reset_states()
                     train_loss.reset_states()
@@ -603,7 +543,7 @@ def train():
                     else:
                         log_print("WARNING: dry_run flag is ON! Not saving checkpoints or tensorboard data")
                     
-                    #reset metrics                     
+                    #reset validation metrics                     
                     for i in range(0, 7):
                         val_metrics[i].reset_states()
                     val_loss.reset_states()
@@ -613,8 +553,10 @@ def train():
                     
                     progbar = tf.keras.utils.Progbar(step_per_epoch)
                 
+                #save the prediction in order to create a gif file
                 if not int(ckpt.step) % step_gif:
-                    image_seq, seg_seq = data_provider.read_new_image('epoch_test')
+                    image_seq, seg_seq = data_provider.read_new_image('gif_test')
+                    #save images and predictions just at the first iteration
                     if first:
                         for i in range(0, image_seq.shape[0]):
                             image = np.squeeze(np.array(image_seq[i, -1]))
@@ -626,9 +568,9 @@ def train():
                             seg = Image.fromarray(seg.astype(np.uint8))
                             seg.save(params.experiment_save_dir + '/label' + str(i) + '.png')
                         first = False
-                            
+                    #perform prediction on the images        
                     output = test_epoch(image_seq)
-                    
+                    #save gif
                     for i in range(0, image_seq.shape[0]):
                         image = cv2.normalize(np.array(output[i, -1]), None, 0, 255, cv2.NORM_MINMAX)
 #                        image = cv2.resize(image, (300, 300), interpolation = cv2.INTER_AREA)
@@ -647,8 +589,10 @@ def train():
                         log_print("Saved checkpoint for step {}: {}".format(int(ckpt.step), save_path))
                     else:
                         log_print("WARNING: dry_run flag is ON! Mot saving checkpoints or tensorboard data")                 
-#                
+
+                #if minimum loss found
                 if stop:
+                    #save best model
                     actual_weights = model.get_weights()
                     model.set_weights(best_weights)
                     stopped_epoch = early_stopping.on_train_end()
@@ -661,9 +605,11 @@ def train():
                     log_print('Saved. Continue training')
                     stop = False
                     minimum_found = True
+                    #perform test predictions with best model
                     #create the dataset
                     num_testing = data_provider.num_test()
                     data_provider.enqueue_index('best_test', None)
+                    #perform test and print results on tensorboard
                     for i in range(0, num_testing):
                         image_seq, seg_seq = data_provider.read_new_image('best_test')
                         best_test_output_sequence, best_test_loss_value= best_test_step(image_seq, seg_seq)
@@ -685,15 +631,12 @@ def train():
                     
                     model.set_weights(actual_weights)
                     
-                #when it comes to the end save the final precisions ans losses AND PERFORM PREDICTION ON NEW SAMPLES
+                #when it comes to the end 
                 if ckpt.step == params.num_iterations:
-                    final_train_loss = train_loss.result()
-                    final_val_loss = val_loss.result()
-                    final_train_prec = train_metrics[5].result() * 100
-                    final_val_prec = train_metrics[5].result() * 100
                     #create the dataset
                     num_testing = data_provider.num_test()
                     data_provider.enqueue_index('test', None)
+                    #perform test on the new samples
                     for i in range(0, num_testing):
                         image_seq, seg_seq = data_provider.read_new_image('test')
                         test_output_sequence, test_loss_value= test_step(image_seq, seg_seq)
@@ -709,9 +652,12 @@ def train():
                         test_imgs_dict['Output'] = test_output_sequence[:, -1]
                         tboard(test_summary_writer, test_log_dir, i, test_scalars_dict, test_imgs_dict, step_per_epoch/1)
                         log_print('Printed Testing Step: {} to Tensorboard'.format(i))
-                        for i in range(0, 7):
-                            test_metrics[i].reset_states()
-                        test_loss.reset_states()
+                    #save final test values
+                    final_test_loss = test_loss.result()
+                    final_test_acc = test_metrics[4].result() * 100
+                    final_test_prec = test_metrics[5].result() * 100
+                    final_test_rec = test_metrics[6].result() * 100
+
 
         except (KeyboardInterrupt, ValueError, AWSError) as err:
             if not params.dry_run:
@@ -732,15 +678,14 @@ def train():
                 with open(os.path.join(params.experiment_save_dir, 'model_params.pickle'), 'wb') as fobj:
                     pickle.dump({'name': model.__class__.__name__, 'params': (net_kernel_params,)},
                                 fobj, protocol=pickle.HIGHEST_PROTOCOL)
-                #save parameters values and final loss and precision values 
+                #save parameters values and final loss and metrics values 
                 with open(os.path.join(params.experiment_save_dir, 'params_list.csv'), 'w') as fobj:
                     writer = csv.writer(fobj)
                     model_dict = {'Pretraining': pretraining, 'Mode': pretraining_type, 'Stopping_epoch': stopped_epoch, 'Attention gate': attention_gate,
                                   'Dropout': dropout, 'Recurrent dropout': recurrent_dropout, 'L1': l1, 'L2': l2, 
-                                  'Kernel init': kernel_init, 'Net type': net_type, 'Learning rate': lrate, 
-                                  'Lr decay': lr_decay}
-                    model_dict.update({'Train_loss': final_train_loss, 'Train_precision': final_train_prec,
-                                      'Val_loss': final_val_loss, 'Val_precision': final_val_prec})
+                                  'Kernel init': kernel_init, 'Net type': net_type}
+                    model_dict.update({'Loss': np.array(final_test_loss), 'Accuracy': np.array(final_test_acc), 
+                                  'Precision': np.array(final_test_prec), 'Recall': np.array(final_test_rec)})
                     for key, value in model_dict.items():
                        writer.writerow([key, value])
                 log_print('Saved Model to file: {}'.format(model_fname))
